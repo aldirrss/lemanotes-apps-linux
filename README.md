@@ -1,4 +1,4 @@
-# NotesUp Clone
+# LemaNotes Clone
 
 A Linux desktop notes app built with PyQt6, inspired by Notes-Up.
 
@@ -14,7 +14,7 @@ A Linux desktop notes app built with PyQt6, inspired by Notes-Up.
 
 ## File Structure
 ```
-~/NotesUp/
+~/LemaNotes/
   <NotebookName>/
     <note-title>.md
     <note-title>.meta.json
