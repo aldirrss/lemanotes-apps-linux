@@ -1731,7 +1731,7 @@ class EditorPanel(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("NotesUp")
+        self.setWindowTitle("LemaNotes")
         self.resize(1200, 780)
         self.setMinimumSize(800, 500)
         self._current_notebook = None
@@ -1992,7 +1992,7 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("NotesUp")
+    app.setApplicationName("LemaNotes")
     app.setOrganizationName("Lemacore")
     app.setFont(QFont("Segoe UI", 10))
     window = MainWindow()
