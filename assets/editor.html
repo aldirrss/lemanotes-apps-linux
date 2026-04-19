@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="tui/toastui-editor.min.css">
+<script src="tui/toastui-editor-all.min.js"></script>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<style>
+  :root {
+    --bg:                #0D1B22;
+    --bg2:               #0A1820;
+    --bg3:               #132530;
+    --accent:            #7FDBCA;
+    --text:              #C8DDE8;
+    --muted:             #8EAAB8;
+    --border:            #1A3A4A;
+    --code-bg:           #132530;
+    --sel-bg:            #1A3A4A;
+    --placeholder:       #2A5A6A;
+    --link:              #74B3CE;
+    --mark-bg:           #2A4A1A;
+    --mark-text:         #C8DDE8;
+    --scroll-thumb:      #1A3A4A;
+    --scroll-thumb-hover:#2A5A6A;
+    --font-size:         15px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); }
+
+  .toastui-editor-defaultUI,
+  .toastui-editor-main,
+  .toastui-editor-main-container,
+  .toastui-editor-ww-container,
+  .toastui-editor-ww-content,
+  .toastui-editor-md-container,
+  .toastui-editor-contents {
+    background: var(--bg) !important;
+    color: var(--text) !important;
+    border: none !important;
+  }
+  .toastui-editor-defaultUI { height: 100vh !important; }
+  .toastui-editor-toolbar   { display: none !important; }
+
+  .ProseMirror {
+    background: var(--bg) !important;
+    color: var(--text) !important;
+    font-family: 'Georgia', serif !important;
+    font-size: var(--font-size, 15px) !important;
+    line-height: 1.8 !important;
+    padding: 32px 48px 80px !important;
+    min-height: 100vh !important;
+    caret-color: var(--accent) !important;
+    outline: none !important;
+  }
+
+  .ProseMirror p, .ProseMirror div, .ProseMirror span,
+  .ProseMirror li, .ProseMirror td, .ProseMirror th,
+  .ProseMirror label,
+  .toastui-editor-contents p, .toastui-editor-contents div,
+  .toastui-editor-contents span, .toastui-editor-contents li {
+    color: var(--text) !important;
+  }
+
+  .ProseMirror h1, .ProseMirror h2, .ProseMirror h3, .ProseMirror h4,
+  .toastui-editor-contents h1, .toastui-editor-contents h2,
+  .toastui-editor-contents h3, .toastui-editor-contents h4 {
+    color: var(--accent) !important;
+    font-weight: 600 !important;
+    margin-top: 1.4em !important;
+    margin-bottom: 0.4em !important;
+  }
+  .ProseMirror h1, .toastui-editor-contents h1 {
+    font-size: 1.9em !important;
+    border-bottom: 1px solid var(--border) !important;
+    padding-bottom: 0.3em !important;
+  }
+  .ProseMirror h2, .toastui-editor-contents h2 { font-size: 1.45em !important; }
+  .ProseMirror h3, .toastui-editor-contents h3 { font-size: 1.2em !important; }
+
+  .ProseMirror strong, .toastui-editor-contents strong {
+    color: var(--text) !important; font-weight: 700 !important;
+  }
+  .ProseMirror em, .toastui-editor-contents em   { color: var(--muted) !important; }
+  .ProseMirror a, .toastui-editor-contents a      { color: var(--link) !important; }
+  .ProseMirror s, .toastui-editor-contents s      { color: var(--muted) !important; }
+
+  .ProseMirror mark, .toastui-editor-contents mark {
+    background: var(--mark-bg) !important;
+    color: var(--mark-text) !important;
+    border-radius: 2px !important;
+    padding: 0 2px !important;
+  }
+
+  .ProseMirror code, .toastui-editor-contents code {
+    background: var(--code-bg) !important;
+    color: #F4A261 !important;
+    border-radius: 4px !important;
+    padding: 1px 5px !important;
+    font-family: 'JetBrains Mono', 'Courier New', monospace !important;
+    font-size: 0.88em !important;
+    border: none !important;
+  }
+  .ProseMirror pre, .toastui-editor-contents pre {
+    background: var(--bg2) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px !important;
+    padding: 16px !important;
+    margin: 0.8em 0 !important;
+  }
+  .ProseMirror pre code, .toastui-editor-contents pre code {
+    background: transparent !important;
+    color: var(--text) !important;
+    padding: 0 !important;
+  }
+
+  .ProseMirror blockquote, .toastui-editor-contents blockquote {
+    border-left: 3px solid var(--accent) !important;
+    color: var(--muted) !important;
+    padding-left: 1em !important;
+    margin: 0.8em 0 !important;
+    font-style: italic !important;
+    background: transparent !important;
+  }
+  .ProseMirror blockquote p, .toastui-editor-contents blockquote p {
+    color: var(--muted) !important;
+  }
+
+  .ProseMirror table, .toastui-editor-contents table {
+    border-collapse: collapse !important; width: 100% !important;
+  }
+  .ProseMirror th, .ProseMirror td,
+  .toastui-editor-contents th, .toastui-editor-contents td {
+    border: 1px solid var(--border) !important;
+    padding: 8px 12px !important;
+    color: var(--text) !important;
+    background: var(--bg) !important;
+  }
+  .ProseMirror th, .toastui-editor-contents th {
+    background: var(--code-bg) !important;
+    color: var(--accent) !important;
+  }
+  .ProseMirror .selectedCell { background: var(--sel-bg) !important; }
+
+  .ProseMirror ul, .ProseMirror ol,
+  .toastui-editor-contents ul, .toastui-editor-contents ol {
+    padding-left: 1.5em !important;
+  }
+  .ProseMirror li, .toastui-editor-contents li {
+    margin: 4px 0 !important; color: var(--text) !important;
+  }
+
+  .ProseMirror hr, .toastui-editor-contents hr {
+    border: none !important;
+    border-top: 1px solid var(--border) !important;
+    margin: 1em 0 !important;
+  }
+
+  .ProseMirror .placeholder::before, .ProseMirror p.is-empty::before {
+    color: var(--placeholder) !important;
+    content: attr(data-placeholder) !important;
+    pointer-events: none !important;
+    float: left !important;
+    height: 0 !important;
+  }
+
+  .ProseMirror .task-list-item { list-style: none !important; }
+  .ProseMirror .task-list-item input[type="checkbox"] { margin-right: 6px !important; }
+
+  .toastui-editor-ww-container .ProseMirror-focused { outline: none !important; }
+  ::selection { background: var(--sel-bg) !important; color: var(--text) !important; }
+
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
+</style>
+</head>
+<body>
+<div id="editor"></div>
+
+<script>
+  var editor = null;
+  var bridge = null;
+  var _pendingContent = null;
+  var _editorReady = false;
+  var _currentTheme = 'dark';
+
+  var THEMES = {
+    dark: {
+      '--bg':                 '#0D1B22',
+      '--bg2':                '#0A1820',
+      '--bg3':                '#132530',
+      '--accent':             '#7FDBCA',
+      '--text':               '#C8DDE8',
+      '--muted':              '#8EAAB8',
+      '--border':             '#1A3A4A',
+      '--code-bg':            '#132530',
+      '--sel-bg':             '#1A3A4A',
+      '--placeholder':        '#2A5A6A',
+      '--link':               '#74B3CE',
+      '--mark-bg':            '#2A4A1A',
+      '--mark-text':          '#C8DDE8',
+      '--scroll-thumb':       '#1A3A4A',
+      '--scroll-thumb-hover': '#2A5A6A'
+    },
+    light: {
+      '--bg':                 '#F5F7FA',
+      '--bg2':                '#FFFFFF',
+      '--bg3':                '#EEF1F5',
+      '--accent':             '#1A7A6A',
+      '--text':               '#1A2B35',
+      '--muted':              '#5A7A8A',
+      '--border':             '#D0DBE3',
+      '--code-bg':            '#F0F4F8',
+      '--sel-bg':             '#D0E8E3',
+      '--placeholder':        '#A0BAC5',
+      '--link':               '#1A5A9A',
+      '--mark-bg':            '#FFF176',
+      '--mark-text':          '#1A2B35',
+      '--scroll-thumb':       '#C0CDD5',
+      '--scroll-thumb-hover': '#A0B5BF'
+    },
+    sepia: {
+      '--bg':                 '#F4ECD8',
+      '--bg2':                '#EDE3CA',
+      '--bg3':                '#E5D9BE',
+      '--accent':             '#7A5C3A',
+      '--text':               '#3C2A1A',
+      '--muted':              '#8A6A4A',
+      '--border':             '#C8B896',
+      '--code-bg':            '#E5D9BE',
+      '--sel-bg':             '#D8C8A8',
+      '--placeholder':        '#A89070',
+      '--link':               '#5A3A8A',
+      '--mark-bg':            '#E8C860',
+      '--mark-text':          '#3C2A1A',
+      '--scroll-thumb':       '#C8B896',
+      '--scroll-thumb-hover': '#B8A880'
+    }
+  };
+
+  function setTheme(name) {
+    var t = THEMES[name] || THEMES['dark'];
+    var root = document.documentElement;
+    for (var key in t) {
+      root.style.setProperty(key, t[key]);
+    }
+    _currentTheme = name;
+  }
+
+  function setFontSize(size) {
+    document.documentElement.style.setProperty('--font-size', size + 'px');
+  }
+
+  function initEditor() {
+    editor = new toastui.Editor({
+      el: document.getElementById('editor'),
+      initialEditType: 'wysiwyg',
+      previewStyle: 'vertical',
+      height: '100vh',
+      placeholder: 'Start writing\u2026',
+      usageStatistics: false,
+      toolbarItems: [],
+      events: {
+        change: function() {
+          if (bridge) {
+            bridge.on_content_change(editor.getMarkdown());
+          }
+        },
+        caretChange: function() {
+          if (bridge) {
+            bridge.on_format_change(JSON.stringify(getActiveFormats()));
+          }
+        }
+      }
+    });
+
+    _editorReady = true;
+    if (_pendingContent !== null) {
+      editor.setMarkdown(_pendingContent);
+      _pendingContent = null;
+    }
+    if (bridge) bridge.on_editor_ready();
+  }
+
+  function setContent(md) {
+    if (_editorReady && editor) {
+      editor.setMarkdown(md || '');
+    } else {
+      _pendingContent = md || '';
+    }
+  }
+
+  function getContent() {
+    if (editor) return editor.getMarkdown();
+    return '';
+  }
+
+  function execCmd(cmd, payload) {
+    if (editor) {
+      try {
+        if (payload !== undefined) {
+          editor.exec(cmd, payload);
+        } else {
+          editor.exec(cmd);
+        }
+      } catch(e) {}
+    }
+  }
+
+  function getActiveFormats() {
+    if (!editor) return {};
+    try {
+      var core = editor._editor;
+      var wwe  = core && (core.wwEditor || core.wwe);
+      var pm   = wwe && wwe.getEditor && wwe.getEditor();
+      if (!pm) return {};
+      var state = pm.state;
+      var sel   = state.selection;
+      var marks = sel.empty
+        ? (state.storedMarks || state.doc.resolve(sel.from).marks())
+        : state.doc.resolve(sel.from + 1).marks();
+      var a = {bold:false,italic:false,strike:false,code:false,
+               heading:0,bulletList:false,orderedList:false,
+               taskList:false,blockquote:false};
+      marks.forEach(function(m) {
+        var n = m.type.name;
+        if (n === 'strong')  a.bold   = true;
+        if (n === 'em')      a.italic = true;
+        if (n === 'strike')  a.strike = true;
+        if (n === 'code')    a.code   = true;
+      });
+      var $from = state.doc.resolve(sel.from);
+      for (var d = $from.depth; d >= 0; d--) {
+        var node = $from.node(d), name = node.type.name;
+        if (name === 'heading')      { a.heading      = node.attrs.level; break; }
+        if (name === 'bullet_list')  { a.bulletList   = true; break; }
+        if (name === 'ordered_list') { a.orderedList  = true; break; }
+        if (name === 'task_list')    { a.taskList     = true; break; }
+        if (name === 'blockquote')   { a.blockquote   = true; break; }
+      }
+      return a;
+    } catch(e) { return {}; }
+  }
+
+  function getStats() {
+    if (!editor) return {words: 0, chars: 0};
+    var md = editor.getMarkdown();
+    var text = md
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/`[^`]+`/g, ' ')
+      .replace(/#{1,6}\s+/g, '')
+      .replace(/\*\*|__|\*\*|~~|\*|_/g, '')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+      .replace(/^[-*+>\s]\s*/gm, '')
+      .replace(/^\d+\.\s/gm, '')
+      .trim();
+    var words = text.length > 0 ? text.split(/\s+/).filter(function(w) { return w.length > 0; }).length : 0;
+    return {words: words, chars: md.length};
+  }
+
+  function replaceInEditor(findText, replaceText, replaceAll) {
+    if (!editor || !findText) return;
+    var md = editor.getMarkdown();
+    var newMd;
+    if (replaceAll) {
+      newMd = md.split(findText).join(replaceText);
+    } else {
+      var idx = md.indexOf(findText);
+      if (idx === -1) return;
+      newMd = md.substring(0, idx) + replaceText + md.substring(idx + findText.length);
+    }
+    editor.setMarkdown(newMd);
+  }
+
+  function insertLink(url, text) {
+    if (!editor) return;
+    try {
+      editor.exec('addLink', {linkUrl: url, linkText: text || url});
+    } catch(e) {
+      editor.insertText('[' + (text || url) + '](' + url + ')');
+    }
+  }
+
+  function insertImage(url, alt) {
+    if (!editor) return;
+    try {
+      editor.exec('addImage', {imageUrl: url, altText: alt || ''});
+    } catch(e) {
+      editor.insertText('!['+ (alt || '') + '](' + url + ')');
+    }
+  }
+
+  function insertTable(rows, cols) {
+    if (!editor) return;
+    try {
+      editor.exec('addTable', {rowCount: rows, columnCount: cols});
+    } catch(e) {
+      var header = '| ' + Array.from({length: cols}, function(_, i) { return 'Col ' + (i+1); }).join(' | ') + ' |';
+      var sep    = '| ' + Array.from({length: cols}, function() { return '---'; }).join(' | ') + ' |';
+      var row    = '| ' + Array.from({length: cols}, function() { return '   '; }).join(' | ') + ' |';
+      var lines  = [header, sep];
+      for (var i = 0; i < rows - 1; i++) lines.push(row);
+      editor.insertText('\n' + lines.join('\n') + '\n');
+    }
+  }
+
+  function insertCodeBlock(lang) {
+    if (!editor) return;
+    editor.insertText('\n```' + (lang || '') + '\n\n```\n');
+  }
+
+  function toggleHeading(level) {
+    if (!editor) return;
+    var active = getActiveFormats();
+    if (active.heading === level) {
+      // Already this heading level → convert back to paragraph
+      try {
+        var wwe = editor._editor && (editor._editor.wwEditor || editor._editor.wwe);
+        var pm  = wwe && wwe.getEditor && wwe.getEditor();
+        if (pm && pm.state.schema.nodes.paragraph) {
+          var tr = pm.state.tr.setBlockType(
+            pm.state.selection.from,
+            pm.state.selection.to,
+            pm.state.schema.nodes.paragraph
+          );
+          pm.dispatch(tr);
+          return;
+        }
+      } catch(e) {}
+      // Fallback: re-apply heading (some TUI versions toggle off this way)
+      editor.exec('heading', {level: level});
+    } else {
+      editor.exec('heading', {level: level});
+    }
+  }
+
+  function highlightSelection() {
+    if (!editor) return;
+    try {
+      document.execCommand('hiliteColor', false,
+        _currentTheme === 'light' ? '#FFF176' : '#2A5A1A');
+    } catch(e) {}
+  }
+
+  new QWebChannel(qt.webChannelTransport, function(channel) {
+    bridge = channel.objects.bridge;
+    initEditor();
+  });
+</script>
+</body>
+</html>
