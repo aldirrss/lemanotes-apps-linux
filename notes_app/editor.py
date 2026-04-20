@@ -5,7 +5,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QLabel, QFrame,
-    QFileDialog, QDialog,
+    QFileDialog, QDialog, QScrollArea,
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage
@@ -95,14 +95,23 @@ class EditorPanel(QWidget):
 
         # ── Tag bar ──
         self._tag_wrap = QWidget()
-        self._tag_wrap.setFixedHeight(36)
+        self._tag_wrap.setFixedHeight(38)
         tagl = QHBoxLayout(self._tag_wrap)
-        tagl.setContentsMargins(20, 0, 16, 0)
+        tagl.setContentsMargins(20, 4, 16, 4)
+        tagl.setSpacing(6)
         self._tag_icon = QLabel("\U0001f3f7")
+        self._tag_icon.setFixedWidth(16)
+        self._tag_icon.setToolTip("Note tags")
         tagl.addWidget(self._tag_icon)
+        self._tag_scroll = QScrollArea()
+        self._tag_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._tag_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._tag_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._tag_scroll.setWidgetResizable(True)
         self.tag_bar = TagBar()
         self.tag_bar.tags_changed.connect(self._schedule_save)
-        tagl.addWidget(self.tag_bar)
+        self._tag_scroll.setWidget(self.tag_bar)
+        tagl.addWidget(self._tag_scroll)
         layout.addWidget(self._tag_wrap)
 
         # ── Formatting toolbar ──
@@ -320,7 +329,14 @@ class EditorPanel(QWidget):
         self.title_input.setStyleSheet(f"""
             QLineEdit {{
                 background: transparent; border: none;
+                border-bottom: 2px solid transparent;
                 color: {t['text2']}; font-size: 17px; font-weight: 700;
+            }}
+            QLineEdit:focus {{
+                border-bottom: 2px solid {t['accent']};
+            }}
+            QLineEdit::placeholder {{
+                color: {t['placeholder']}; font-weight: 400;
             }}
         """)
         self._pin_btn.setStyleSheet(f"""
@@ -334,6 +350,7 @@ class EditorPanel(QWidget):
             f"background: {t['bg2']}; border-bottom: 1px solid {t['border3']};"
         )
         self._tag_icon.setStyleSheet(f"color: {t['tag_lbl']}; font-size: 12px;")
+        self._tag_scroll.setStyleSheet(f"background: transparent; border: none;")
         self._fmt_toolbar.setStyleSheet(
             f"background: {t['bg2']}; border-bottom: 1px solid {t['border3']};"
         )
@@ -349,6 +366,10 @@ class EditorPanel(QWidget):
             QPushButton:checked {{
                 background: {t['accent']}; color: {t['accent_fg']};
                 border-color: {t['accent']};
+            }}
+            QPushButton:disabled {{
+                background: {t['bg']}; color: {t['border2']};
+                border-color: {t['border']};
             }}
         """
         for btn in self._fmt_buttons:

@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QFont, QKeySequence
 
-from notes_app.themes import THEMES
+from notes_app.themes import THEMES, _THEME_CYCLE  # noqa: F401
 from notes_app.shortcuts import _MANDATORY_SHORTCUTS
 from notes_app.dialogs import SettingsDialog
 from notes_app.sidebar import SidebarPanel
@@ -34,7 +34,8 @@ class MainWindow(QMainWindow):
         self._current_section: str | None = None
 
         settings = load_settings()
-        self._theme_name = settings.get("theme", "dark")
+        saved = settings.get("theme", "dark")
+        self._theme_name = saved if saved in THEMES else "dark"
         self._font_size = settings.get("font_size", 15)
         self._disabled_shortcuts: list[str] = settings.get("disabled_shortcuts", [])
         self._notebook_sort: str = settings.get("notebook_sort", "name_asc")
@@ -42,8 +43,12 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._build_menu()
         self.editor_panel.note_loaded.connect(self._export_pdf_act.setEnabled)
+        self.editor_panel.note_loaded.connect(self._on_note_load_state)
         self.editor_panel.pdf_export_done.connect(self._on_pdf_exported)
         self.editor_panel.word_count_updated.connect(self._word_count_lbl.setText)
+        self.editor_panel.title_input.textChanged.connect(
+            lambda t: self.setWindowTitle(f"{t.strip()} \u2014 LemaNotes" if t.strip() else "LemaNotes")
+        )
         self.editor_panel.apply_shortcuts(self._disabled_shortcuts)
         self._register_menu_shortcuts(self._disabled_shortcuts)
         self._load_notebooks()
@@ -119,6 +124,11 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self._export_pdf_act)
 
         view_menu = self._menubar.addMenu("View")
+        self._refresh_act = QAction("Refresh Notes", self)
+        self._refresh_act.setShortcut(QKeySequence("Ctrl+R"))
+        self._refresh_act.triggered.connect(self._refresh_notes)
+        view_menu.addAction(self._refresh_act)
+        view_menu.addSeparator()
         self._toggle_theme_act = QAction("Cycle Theme", self)
         self._toggle_theme_act.setShortcut(QKeySequence("Ctrl+Shift+D"))
         self._toggle_theme_act.triggered.connect(self._toggle_theme)
@@ -159,8 +169,8 @@ class MainWindow(QMainWindow):
             save_settings(s)
 
     def _toggle_theme(self):
-        cycle = {"dark": "light", "light": "sepia", "sepia": "dark"}
-        self._apply_theme(cycle.get(self._theme_name, "dark"))
+        idx = _THEME_CYCLE.index(self._theme_name) if self._theme_name in _THEME_CYCLE else 0
+        self._apply_theme(_THEME_CYCLE[(idx + 1) % len(_THEME_CYCLE)])
 
     def _register_menu_shortcuts(self, disabled: list[str]):
         disabled_set = set(disabled)
@@ -170,6 +180,7 @@ class MainWindow(QMainWindow):
             "Ctrl+E":       self._export_pdf_act,
             "Ctrl+Shift+D": self._toggle_theme_act,
             "Ctrl+,":       self._settings_act,
+            "Ctrl+R":       self._refresh_act,
         }
         for key, act in menu_map.items():
             if key in disabled_set and key not in _MANDATORY_SHORTCUTS:
@@ -259,6 +270,7 @@ class MainWindow(QMainWindow):
             nbs = storage.list_notebooks()
             self.sidebar.load_notebooks(nbs)
             self.sidebar.select_notebook(name.strip())
+            self.status_bar.showMessage(f"Notebook '{name.strip()}' created", 2000)
 
     def _create_note(self):
         if not self._current_notebook:
@@ -271,6 +283,7 @@ class MainWindow(QMainWindow):
                 content=f"# {title.strip()}\n\n",
                 section=self._current_section,
             )
+            self.status_bar.showMessage(f"Note '{title.strip()}' created", 2000)
             self.note_list.load_notes(self._current_notebook, self._current_section)
             target = (self._current_notebook, self._current_section or "", note["slug"])
             for i in range(self.note_list.list_widget.count()):
@@ -283,6 +296,7 @@ class MainWindow(QMainWindow):
         storage.delete_note(notebook, slug, section or None)
         self.note_list.load_notes(notebook, section or None)
         self.editor_panel.clear()
+        self.status_bar.showMessage("Note deleted", 2000)
 
     def _on_tag_selected(self, tag: str):
         self.note_list.filter_by_tag(tag)
@@ -315,7 +329,8 @@ class MainWindow(QMainWindow):
     # ── Pin / Priority handlers ────────────────────────────────────────────────
 
     def _on_pin_requested(self, notebook: str, section: str, slug: str):
-        storage.toggle_pin(notebook, slug, section or None)
+        new_pinned = storage.toggle_pin(notebook, slug, section or None)
+        self.status_bar.showMessage("Note pinned" if new_pinned else "Note unpinned", 1500)
         self.note_list.refresh()
         if (self.editor_panel._notebook == notebook and
                 self.editor_panel._slug == slug and
@@ -331,6 +346,8 @@ class MainWindow(QMainWindow):
 
     def _on_priority_changed(self, notebook: str, section: str, slug: str, priority: int):
         storage.set_priority(notebook, slug, priority, section or None)
+        labels = {0: "cleared", 1: "set to Low", 2: "set to Medium", 3: "set to High"}
+        self.status_bar.showMessage(f"Priority {labels.get(priority, 'updated')}", 1500)
         self.note_list.refresh()
 
     def _on_note_pin_toggled(self, *_):
@@ -363,6 +380,15 @@ class MainWindow(QMainWindow):
         )
         if path:
             self.editor_panel.export_pdf(path)
+
+    def _refresh_notes(self):
+        self.note_list.refresh()
+        self.sidebar.refresh_tags()
+        self.status_bar.showMessage("Refreshed", 1500)
+
+    def _on_note_load_state(self, loaded: bool):
+        if not loaded:
+            self.setWindowTitle("LemaNotes")
 
     def _on_pdf_exported(self, path: str, success: bool):
         if success:

@@ -83,7 +83,11 @@
     color: var(--text) !important; font-weight: 700 !important;
   }
   .ProseMirror em, .toastui-editor-contents em   { color: var(--muted) !important; }
-  .ProseMirror a, .toastui-editor-contents a      { color: var(--link) !important; }
+  .ProseMirror a, .toastui-editor-contents a {
+    color: var(--link) !important;
+    transition: color 0.15s ease, opacity 0.15s ease;
+  }
+  .ProseMirror a:hover, .toastui-editor-contents a:hover { opacity: 0.75 !important; }
   .ProseMirror s, .toastui-editor-contents s      { color: var(--muted) !important; }
 
   .ProseMirror mark, .toastui-editor-contents mark {
@@ -94,6 +98,7 @@
   }
 
   .ProseMirror code, .toastui-editor-contents code {
+    transition: background 0.15s ease;
     background: var(--code-bg) !important;
     color: #F4A261 !important;
     border-radius: 4px !important;
@@ -116,6 +121,7 @@
   }
 
   .ProseMirror blockquote, .toastui-editor-contents blockquote {
+    transition: border-color 0.2s ease, background 0.2s ease;
     border-left: 3px solid var(--accent) !important;
     color: var(--muted) !important;
     padding-left: 1em !important;
@@ -171,10 +177,11 @@
   .toastui-editor-ww-container .ProseMirror-focused { outline: none !important; }
   ::selection { background: var(--sel-bg) !important; color: var(--text) !important; }
 
-  ::-webkit-scrollbar { width: 6px; }
-  ::-webkit-scrollbar-track { background: var(--bg); }
-  ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 3px; }
+  ::-webkit-scrollbar { width: 7px; height: 7px; }
+  ::-webkit-scrollbar-track { background: var(--bg); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 4px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
+  ::-webkit-scrollbar-corner { background: var(--bg); }
 </style>
 </head>
 <body>
@@ -205,39 +212,124 @@
       '--scroll-thumb':       '#1A3A4A',
       '--scroll-thumb-hover': '#2A5A6A'
     },
-    light: {
-      '--bg':                 '#F5F7FA',
-      '--bg2':                '#FFFFFF',
-      '--bg3':                '#EEF1F5',
-      '--accent':             '#1A7A6A',
-      '--text':               '#1A2B35',
-      '--muted':              '#5A7A8A',
-      '--border':             '#D0DBE3',
-      '--code-bg':            '#F0F4F8',
-      '--sel-bg':             '#D0E8E3',
-      '--placeholder':        '#A0BAC5',
-      '--link':               '#1A5A9A',
-      '--mark-bg':            '#FFF176',
-      '--mark-text':          '#1A2B35',
-      '--scroll-thumb':       '#C0CDD5',
-      '--scroll-thumb-hover': '#A0B5BF'
+    deep_sea: {
+      '--bg':                 '#020B18',
+      '--bg2':                '#041525',
+      '--bg3':                '#062035',
+      '--accent':             '#38BDF8',
+      '--text':               '#BAE6FD',
+      '--muted':              '#4A8AAA',
+      '--border':             '#0A3050',
+      '--code-bg':            '#062035',
+      '--sel-bg':             '#0A3050',
+      '--placeholder':        '#1A4A6A',
+      '--link':               '#7DD3FC',
+      '--mark-bg':            '#0A3050',
+      '--mark-text':          '#BAE6FD',
+      '--scroll-thumb':       '#0A3050',
+      '--scroll-thumb-hover': '#0D3D60'
     },
-    sepia: {
-      '--bg':                 '#F4ECD8',
-      '--bg2':                '#EDE3CA',
-      '--bg3':                '#E5D9BE',
-      '--accent':             '#7A5C3A',
-      '--text':               '#3C2A1A',
-      '--muted':              '#8A6A4A',
-      '--border':             '#C8B896',
-      '--code-bg':            '#E5D9BE',
-      '--sel-bg':             '#D8C8A8',
-      '--placeholder':        '#A89070',
-      '--link':               '#5A3A8A',
-      '--mark-bg':            '#E8C860',
-      '--mark-text':          '#3C2A1A',
-      '--scroll-thumb':       '#C8B896',
-      '--scroll-thumb-hover': '#B8A880'
+    midnight: {
+      '--bg':                 '#0D0D1A',
+      '--bg2':                '#12122A',
+      '--bg3':                '#18183A',
+      '--accent':             '#A78BFA',
+      '--text':               '#E2E0FF',
+      '--muted':              '#7A78AA',
+      '--border':             '#2A2A5A',
+      '--code-bg':            '#18183A',
+      '--sel-bg':             '#2A2A5A',
+      '--placeholder':        '#3A3870',
+      '--link':               '#C4B5FD',
+      '--mark-bg':            '#2A1A5A',
+      '--mark-text':          '#E2E0FF',
+      '--scroll-thumb':       '#2A2A5A',
+      '--scroll-thumb-hover': '#32326A'
+    },
+    night_forest: {
+      '--bg':                 '#071A0E',
+      '--bg2':                '#0A2515',
+      '--bg3':                '#0D3020',
+      '--accent':             '#4ADE80',
+      '--text':               '#BBF7D0',
+      '--muted':              '#3A8A52',
+      '--border':             '#144A28',
+      '--code-bg':            '#0D3020',
+      '--sel-bg':             '#144A28',
+      '--placeholder':        '#1A4A28',
+      '--link':               '#86EFAC',
+      '--mark-bg':            '#144A18',
+      '--mark-text':          '#BBF7D0',
+      '--scroll-thumb':       '#144A28',
+      '--scroll-thumb-hover': '#1A5C30'
+    },
+    classic: {
+      '--bg':                 '#FFFFFF',
+      '--bg2':                '#F5F9FF',
+      '--bg3':                '#EBF3FF',
+      '--accent':             '#2563EB',
+      '--text':               '#1E293B',
+      '--muted':              '#64748B',
+      '--border':             '#C8D8EE',
+      '--code-bg':            '#EBF3FF',
+      '--sel-bg':             '#DBEAFE',
+      '--placeholder':        '#94A3B8',
+      '--link':               '#2563EB',
+      '--mark-bg':            '#FEF08A',
+      '--mark-text':          '#1E293B',
+      '--scroll-thumb':       '#C8D8EE',
+      '--scroll-thumb-hover': '#B0C8E8'
+    },
+    ocean: {
+      '--bg':                 '#F0F9FF',
+      '--bg2':                '#FFFFFF',
+      '--bg3':                '#E0F2FE',
+      '--accent':             '#0369A1',
+      '--text':               '#0C1A2E',
+      '--muted':              '#4A7A9B',
+      '--border':             '#BAE6FD',
+      '--code-bg':            '#E0F2FE',
+      '--sel-bg':             '#BAE6FD',
+      '--placeholder':        '#7AAEC8',
+      '--link':               '#0369A1',
+      '--mark-bg':            '#FEF08A',
+      '--mark-text':          '#0C1A2E',
+      '--scroll-thumb':       '#BAE6FD',
+      '--scroll-thumb-hover': '#7DD3FC'
+    },
+    forest: {
+      '--bg':                 '#F0FFF4',
+      '--bg2':                '#FFFFFF',
+      '--bg3':                '#DCFCE7',
+      '--accent':             '#16A34A',
+      '--text':               '#0A1F0F',
+      '--muted':              '#4A7A5A',
+      '--border':             '#A7F3D0',
+      '--code-bg':            '#DCFCE7',
+      '--sel-bg':             '#BBF7D0',
+      '--placeholder':        '#7AAA8A',
+      '--link':               '#16A34A',
+      '--mark-bg':            '#FEF08A',
+      '--mark-text':          '#0A1F0F',
+      '--scroll-thumb':       '#A7F3D0',
+      '--scroll-thumb-hover': '#6EE7B7'
+    },
+    rose: {
+      '--bg':                 '#FFF5F7',
+      '--bg2':                '#FFFFFF',
+      '--bg3':                '#FFE4E8',
+      '--accent':             '#E11D48',
+      '--text':               '#1F0A10',
+      '--muted':              '#8A4050',
+      '--border':             '#FECDD3',
+      '--code-bg':            '#FFE4E8',
+      '--sel-bg':             '#FECDD3',
+      '--placeholder':        '#B87080',
+      '--link':               '#E11D48',
+      '--mark-bg':            '#FEF08A',
+      '--mark-text':          '#1F0A10',
+      '--scroll-thumb':       '#FECDD3',
+      '--scroll-thumb-hover': '#FDA4AF'
     }
   };
 

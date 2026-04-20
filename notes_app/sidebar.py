@@ -24,8 +24,8 @@ class SidebarPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._theme = THEMES["dark"]
-        self.setMinimumWidth(180)
-        self.setMaximumWidth(250)
+        self.setMinimumWidth(190)
+        self.setMaximumWidth(280)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -130,7 +130,7 @@ class SidebarPanel(QWidget):
             }}
             QTreeWidget::item {{
                 color: {t['muted']}; padding: 5px 8px; font-size: 13px;
-                border: none;
+                border: none; white-space: nowrap;
             }}
             QTreeWidget::item:selected {{
                 background: {t['item_sel']}; color: {t['accent']};
@@ -235,7 +235,14 @@ class SidebarPanel(QWidget):
         self._tags_layout.addWidget(pin_btn)
         self._pin_filter_btn_ref = pin_btn
 
-        for tag in storage.get_all_tags():
+        all_tags = storage.get_all_tags()
+        if not all_tags:
+            no_tags_lbl = QLabel("No tags yet")
+            no_tags_lbl.setStyleSheet(
+                f"color: {t['muted2']}; font-size: 11px; padding: 4px 16px;"
+            )
+            self._tags_layout.addWidget(no_tags_lbl)
+        for tag in all_tags:
             btn = QPushButton(f"  {tag}")
             btn.setCheckable(True)
             btn.setChecked(tag == self._active_tag)

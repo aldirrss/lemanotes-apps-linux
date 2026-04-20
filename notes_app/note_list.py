@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QPushButton, QLabel, QListWidgetItem, QMenu, QMessageBox,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
 
 from notes_app.themes import THEMES
 from notes_app.widgets import NoteListWidget, TagPill
@@ -10,7 +10,7 @@ from notes_app import storage
 from notes_app.settings import load_settings, save_settings
 
 
-_PRIORITY_COLORS = {1: "#F5C518", 2: "#E87C2B", 3: "#E84040"}
+_PRIORITY_COLORS_FALLBACK = {1: "#F5C518", 2: "#E87C2B", 3: "#E84040"}
 _SORT_LABELS = {
     "updated_desc":  "Updated (newest first)",
     "updated_asc":   "Updated (oldest first)",
@@ -50,8 +50,14 @@ class NoteListPanel(QWidget):
         self.nb_label = QLabel("Select a notebook")
         tl.addWidget(self.nb_label)
         tl.addStretch()
+        self._refresh_btn = QPushButton("\u21bb")
+        self._refresh_btn.setFixedSize(28, 28)
+        self._refresh_btn.setToolTip("Refresh notes (Ctrl+R)")
+        self._refresh_btn.clicked.connect(self.refresh)
+        tl.addWidget(self._refresh_btn)
         self._new_btn = QPushButton("\uff0b Note")
         self._new_btn.setFixedHeight(28)
+        self._new_btn.setToolTip("New note (Ctrl+N)")
         self._new_btn.clicked.connect(self.new_note_requested)
         tl.addWidget(self._new_btn)
         layout.addWidget(self._toolbar)
@@ -76,10 +82,12 @@ class NoteListPanel(QWidget):
         self._pin_filter_btn.setCheckable(True)
         self._pin_filter_btn.setChecked(self._filter_pinned)
         self._pin_filter_btn.setFixedHeight(22)
+        self._pin_filter_btn.setToolTip("Show pinned notes only")
         self._pin_filter_btn.clicked.connect(self._on_pin_filter_toggled)
         sbl.addWidget(self._pin_filter_btn)
         self._sort_btn = QPushButton("\u21c5 Sort")
         self._sort_btn.setFixedHeight(22)
+        self._sort_btn.setToolTip("Sort notes")
         self._sort_btn.clicked.connect(self._show_sort_menu)
         sbl.addWidget(self._sort_btn)
         sbl.addStretch()
@@ -96,6 +104,11 @@ class NoteListPanel(QWidget):
         self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
         layout.addWidget(self.list_widget)
 
+        self._empty_lbl = QLabel("No notes yet.\nClick '\uff0b Note' to create one.")
+        self._empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_lbl.hide()
+        layout.addWidget(self._empty_lbl)
+
         self._notes = []
         self._tag_filter: str | None = None
         self._current_section: str | None = None
@@ -108,6 +121,14 @@ class NoteListPanel(QWidget):
         self.nb_label.setStyleSheet(
             f"color: {t['accent']}; font-weight: 600; font-size: 13px;"
         )
+        _icon_btn_s = f"""
+            QPushButton {{
+                background: {t['border']}; color: {t['muted']};
+                border: none; border-radius: 14px; font-size: 14px;
+            }}
+            QPushButton:hover {{ background: {t['item_sel']}; color: {t['accent']}; }}
+        """
+        self._refresh_btn.setStyleSheet(_icon_btn_s)
         self._new_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {t['accent']}; color: {t['accent_fg']};
@@ -141,6 +162,9 @@ class NoteListPanel(QWidget):
         self._sort_btn.setStyleSheet(sort_btn_s)
         self._sortbar.setStyleSheet(f"background: {t['bg4']};")
         self._sep.setStyleSheet(f"background: {t['border']};")
+        self._empty_lbl.setStyleSheet(
+            f"color: {t['muted2']}; font-size: 13px; background: {t['bg4']};"
+        )
         self.list_widget.setStyleSheet(f"""
             QListWidget {{
                 background: {t['bg4']}; border: none; outline: none;
@@ -229,6 +253,12 @@ class NoteListPanel(QWidget):
 
     def _render_notes(self, notes: list[dict]):
         self.list_widget.clear()
+        if not notes:
+            self.list_widget.hide()
+            self._empty_lbl.show()
+            return
+        self.list_widget.show()
+        self._empty_lbl.hide()
         for note in notes:
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole,
@@ -237,7 +267,10 @@ class NoteListPanel(QWidget):
                          {"pinned": note.get("pinned", False),
                           "priority": note.get("priority", 0)})
             widget = self._make_note_card(note)
-            item.setSizeHint(widget.sizeHint())
+            card_h = 58
+            if note.get("tags"):
+                card_h += 28
+            item.setSizeHint(QSize(0, card_h))
             self.list_widget.addItem(item)
             self.list_widget.setItemWidget(item, widget)
 
@@ -253,10 +286,15 @@ class NoteListPanel(QWidget):
         hl.setSpacing(0)
 
         if priority > 0:
+            _pcolors = {
+                1: t.get("priority_low",  _PRIORITY_COLORS_FALLBACK[1]),
+                2: t.get("priority_med",  _PRIORITY_COLORS_FALLBACK[2]),
+                3: t.get("priority_high", _PRIORITY_COLORS_FALLBACK[3]),
+            }
             bar = QFrame()
             bar.setFixedWidth(4)
             bar.setStyleSheet(
-                f"background: {_PRIORITY_COLORS[priority]}; border-radius: 2px; margin: 4px 0;"
+                f"background: {_pcolors[priority]}; border-radius: 2px; margin: 4px 0;"
             )
             hl.addWidget(bar)
 
@@ -284,10 +322,19 @@ class NoteListPanel(QWidget):
             tag_row = QHBoxLayout()
             tag_row.setContentsMargins(0, 0, 0, 0)
             tag_row.setSpacing(4)
-            for tag in note["tags"][:3]:
+            visible_tags = note["tags"][:3]
+            extra = len(note["tags"]) - len(visible_tags)
+            for tag in visible_tags:
                 pill = TagPill(tag, removable=False)
                 pill.apply_theme(t)
                 tag_row.addWidget(pill)
+            if extra > 0:
+                more_lbl = QLabel(f"+{extra}")
+                more_lbl.setStyleSheet(
+                    f"color: {t['muted2']}; font-size: 10px; padding: 0 2px;"
+                )
+                more_lbl.setToolTip(", ".join(note["tags"][3:]))
+                tag_row.addWidget(more_lbl)
             tag_row.addStretch()
             vl.addLayout(tag_row)
 

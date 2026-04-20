@@ -15,6 +15,7 @@ SHORTCUTS = [
     {"key": "Ctrl+E",       "label": "Export PDF",        "category": "App"},
     {"key": "Ctrl+,",       "label": "Settings",          "category": "App"},
     {"key": "Ctrl+Shift+D", "label": "Cycle Theme",       "category": "App"},
+    {"key": "Ctrl+R",       "label": "Refresh Notes",      "category": "App"},
 ]
 
 _MANDATORY_SHORTCUTS = {"Ctrl+,", "Ctrl+Z"}

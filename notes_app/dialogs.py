@@ -190,8 +190,25 @@ class SettingsDialog(QDialog):
         form.setSpacing(10)
 
         self.theme_combo = QComboBox()
-        for label, val in [("Dark", "dark"), ("Light", "light"), ("Sepia", "sepia")]:
-            self.theme_combo.addItem(label, val)
+        for label, val in [
+            ("─── Dark ───", None),
+            ("Dark",         "dark"),
+            ("Deep Sea",     "deep_sea"),
+            ("Midnight",     "midnight"),
+            ("Night Forest", "night_forest"),
+            ("─── Light ───", None),
+            ("Classic",      "classic"),
+            ("Ocean",        "ocean"),
+            ("Forest",       "forest"),
+            ("Rose",         "rose"),
+        ]:
+            if val is None:
+                self.theme_combo.addItem(label)
+                self.theme_combo.model().item(
+                    self.theme_combo.count() - 1
+                ).setEnabled(False)
+            else:
+                self.theme_combo.addItem(label, val)
         idx = self.theme_combo.findData(current_theme)
         if idx >= 0:
             self.theme_combo.setCurrentIndex(idx)
