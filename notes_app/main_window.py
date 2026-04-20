@@ -51,7 +51,7 @@ THEMES = {
         "muted":        "#8EAAB8",
         "muted2":       "#4A7A8A",
         "item_sel":     "#1A3A4A",
-        "item_hover":   "#132530",
+        "item_hover":   "#224050",
         "pill_bg":      "#2A4858",
         "pill_text":    "#7FDBCA",
         "placeholder":  "#2A5A6A",
@@ -1676,6 +1676,9 @@ class EditorPanel(QWidget):
         _btn("S\u0336", lambda: self._js_cmd("strike"), "Strikethrough (Ctrl+Shift+S)",
              name="strike", checkable=True)
         _btn("H\u0336", lambda: self._js_highlight(), "Highlight (Ctrl+Shift+H)")
+        _btn("T\u0078\u0332",
+             lambda: self._wysiwyg.page().runJavaScript("clearFormat()"),
+             "Clear formatting")
         _div()
         # Group 2: headings
         _btn("H1", lambda: self._wysiwyg.page().runJavaScript("toggleHeading(1)"),
@@ -1684,6 +1687,9 @@ class EditorPanel(QWidget):
              "Heading 2", name="h2", checkable=True)
         _btn("H3", lambda: self._wysiwyg.page().runJavaScript("toggleHeading(3)"),
              "Heading 3", name="h3", checkable=True)
+        _btn("\xb6",
+             lambda: self._wysiwyg.page().runJavaScript("setParagraph()"),
+             "Body text (normal paragraph)")
         _div()
         # Group 3: lists & blocks
         _btn("\u2022",  lambda: self._js_cmd("bulletList"),  "Bullet list",

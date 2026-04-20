@@ -438,6 +438,41 @@
     }
   }
 
+  function setParagraph() {
+    if (!editor) return;
+    try {
+      var wwe = editor._editor && (editor._editor.wwEditor || editor._editor.wwe);
+      var pm  = wwe && wwe.getEditor && wwe.getEditor();
+      if (pm && pm.state.schema.nodes.paragraph) {
+        var tr = pm.state.tr.setBlockType(
+          pm.state.selection.from,
+          pm.state.selection.to,
+          pm.state.schema.nodes.paragraph
+        );
+        pm.dispatch(tr);
+      }
+    } catch(e) {}
+  }
+
+  function clearFormat() {
+    if (!editor) return;
+    try {
+      var wwe = editor._editor && (editor._editor.wwEditor || editor._editor.wwe);
+      var pm  = wwe && wwe.getEditor && wwe.getEditor();
+      if (pm) {
+        var state = pm.state;
+        var from  = state.selection.from;
+        var to    = state.selection.to;
+        if (from === to) return;
+        var tr = state.tr;
+        Object.values(state.schema.marks).forEach(function(mark) {
+          tr = tr.removeMark(from, to, mark);
+        });
+        pm.dispatch(tr);
+      }
+    } catch(e) {}
+  }
+
   function highlightSelection() {
     if (!editor) return;
     try {
