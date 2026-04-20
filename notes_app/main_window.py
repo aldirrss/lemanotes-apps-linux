@@ -4,24 +4,31 @@ Wires together SidebarPanel, NoteListPanel, and EditorPanel.
 """
 
 import sys
+import threading
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter,
     QHBoxLayout, QStatusBar, QLabel,
-    QDialog, QInputDialog, QMessageBox, QFileDialog,
+    QDialog, QInputDialog, QMessageBox, QFileDialog, QPushButton,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QObject, pyqtSignal
 from PyQt6.QtGui import QAction, QFont, QKeySequence
 
 from notes_app.themes import THEMES, _THEME_CYCLE  # noqa: F401
 from notes_app.shortcuts import _MANDATORY_SHORTCUTS
-from notes_app.dialogs import SettingsDialog
+from notes_app.dialogs import SettingsDialog, LoginDialog, SyncSetupDialog
 from notes_app.sidebar import SidebarPanel
 from notes_app.note_list import NoteListPanel
 from notes_app.editor import EditorPanel
 from notes_app import storage
 from notes_app.settings import load_settings, save_settings
+from notes_app.sync import sync_manager
+
+
+class _SyncSignal(QObject):
+    """Thread-safe bridge for sync status updates."""
+    status = pyqtSignal(str)   # "syncing" | "synced" | "offline" | "error:<msg>"
 
 
 class MainWindow(QMainWindow):
@@ -39,6 +46,9 @@ class MainWindow(QMainWindow):
         self._font_size = settings.get("font_size", 15)
         self._disabled_shortcuts: list[str] = settings.get("disabled_shortcuts", [])
         self._notebook_sort: str = settings.get("notebook_sort", "name_asc")
+
+        self._sync_sig = _SyncSignal()
+        self._sync_sig.status.connect(self._on_sync_status)
 
         self._build_ui()
         self._build_menu()
@@ -102,6 +112,13 @@ class MainWindow(QMainWindow):
         self._word_count_lbl.setContentsMargins(0, 0, 8, 0)
         self.status_bar.addPermanentWidget(self._word_count_lbl)
 
+        self._sync_btn = QPushButton("☁  Sign in")
+        self._sync_btn.setFlat(True)
+        self._sync_btn.setContentsMargins(0, 0, 0, 0)
+        self._sync_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._sync_btn.clicked.connect(self._open_account)
+        self.status_bar.addPermanentWidget(self._sync_btn)
+
     def _build_menu(self):
         self._menubar = self.menuBar()
 
@@ -139,7 +156,25 @@ class MainWindow(QMainWindow):
         self._settings_act.triggered.connect(self._open_settings)
         view_menu.addAction(self._settings_act)
 
+        account_menu = self._menubar.addMenu("Account")
+        self._login_act = QAction("Sign in\u2026", self)
+        self._login_act.triggered.connect(self._open_account)
+        account_menu.addAction(self._login_act)
+        self._logout_act = QAction("Sign out", self)
+        self._logout_act.triggered.connect(self._do_logout)
+        self._logout_act.setVisible(False)
+        account_menu.addAction(self._logout_act)
+        account_menu.addSeparator()
+        self._sync_now_act = QAction("Sync Now", self)
+        self._sync_now_act.triggered.connect(self._sync_now)
+        self._sync_now_act.setEnabled(False)
+        account_menu.addAction(self._sync_now_act)
+        self._setup_act = QAction("Setup Supabase\u2026", self)
+        self._setup_act.triggered.connect(self._open_setup)
+        account_menu.addAction(self._setup_act)
+
         self._update_menu_style()
+        self._refresh_sync_ui()
 
     def _update_menu_style(self):
         t = THEMES[self._theme_name]
@@ -155,6 +190,11 @@ class MainWindow(QMainWindow):
         self._word_count_lbl.setStyleSheet(f"color: {t['muted2']}; font-size: 11px;")
         self._splitter.setStyleSheet(f"QSplitter::handle {{ background: {t['border']}; }}")
         self.setStyleSheet(f"QMainWindow {{ background: {t['bg']}; }}")
+        self._sync_btn.setStyleSheet(
+            f"QPushButton {{ color: {t['muted2']}; font-size: 11px; background: transparent; "
+            f"border: none; padding: 0 8px; }}"
+            f"QPushButton:hover {{ color: {t['accent']}; }}"
+        )
 
     def _apply_theme(self, name: str, save: bool = True):
         self._theme_name = name
@@ -251,6 +291,11 @@ class MainWindow(QMainWindow):
     def _on_note_saved(self):
         self.status_bar.showMessage("Saved", 1500)
         self.sidebar.refresh_tags()
+        nb   = self.editor_panel._notebook
+        slug = self.editor_panel._slug
+        sec  = self.editor_panel._section
+        if nb and slug:
+            self._push_note_async(nb, slug, sec)
         current_item = self.note_list.list_widget.currentItem()
         current_data = current_item.data(Qt.ItemDataRole.UserRole) if current_item else None
         self.note_list.refresh()
@@ -297,6 +342,11 @@ class MainWindow(QMainWindow):
         self.note_list.load_notes(notebook, section or None)
         self.editor_panel.clear()
         self.status_bar.showMessage("Note deleted", 2000)
+        if sync_manager.is_logged_in():
+            threading.Thread(
+                target=lambda: sync_manager.delete_note_remote(notebook, slug, section or None),
+                daemon=True,
+            ).start()
 
     def _on_tag_selected(self, tag: str):
         self.note_list.filter_by_tag(tag)
@@ -395,6 +445,149 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"Exported to {path}", 4000)
         else:
             QMessageBox.warning(self, "Export Failed", f"Could not write PDF to:\n{path}")
+
+    # ── Sync / Account ────────────────────────────────────────────────────────────
+
+    def _refresh_sync_ui(self):
+        if sync_manager.is_logged_in():
+            email = sync_manager.get_user_email() or "Logged in"
+            self._sync_btn.setText(f"☁  {email}")
+            self._login_act.setVisible(False)
+            self._logout_act.setVisible(True)
+            self._sync_now_act.setEnabled(True)
+        else:
+            self._sync_btn.setText("☁  Sign in")
+            self._login_act.setVisible(True)
+            self._logout_act.setVisible(False)
+            self._sync_now_act.setEnabled(False)
+
+    def _push_note_async(self, notebook: str, slug: str, section: str | None):
+        if not sync_manager.is_logged_in():
+            return
+        sig = self._sync_sig
+        sig.status.emit("syncing")
+        def run():
+            sync_manager.push_note(notebook, slug, section)
+            sig.status.emit("synced")
+        threading.Thread(target=run, daemon=True).start()
+
+    def _open_account(self):
+        if sync_manager.is_logged_in():
+            email = sync_manager.get_user_email() or ""
+            choice = QMessageBox.question(
+                self, "Account",
+                f"Signed in as: {email}\n\nSign out?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if choice == QMessageBox.StandardButton.Yes:
+                self._do_logout()
+            return
+
+        if not sync_manager.is_configured():
+            self._open_setup()
+            if not sync_manager.is_configured():
+                return
+
+        self._show_login_dialog()
+
+    def _show_login_dialog(self):
+        t = THEMES[self._theme_name]
+        dlg = LoginDialog(self, t=t)
+        dlg.oauth_requested.connect(self._do_oauth)
+        result = dlg.exec()
+        if result == QDialog.DialogCode.Accepted:
+            email, password = dlg.values()
+            ok, err = sync_manager.login_email(email, password)
+            if ok:
+                self._after_login()
+            else:
+                QMessageBox.warning(self, "Login Failed", err)
+        elif result == 2:
+            email, password = dlg.values()
+            ok, msg = sync_manager.register_email(email, password)
+            if ok:
+                if msg == "confirm_email":
+                    QMessageBox.information(
+                        self, "Check Your Email",
+                        "Account created! Check your email for a confirmation link, then log in."
+                    )
+                else:
+                    self._after_login()
+            else:
+                QMessageBox.warning(self, "Registration Failed", msg)
+        elif result == 3:
+            self._open_setup()
+
+    def _do_oauth(self, provider: str):
+        sig = self._sync_sig
+        sig.status.emit("syncing")
+        def on_done(success: bool, error: str):
+            if success:
+                sig.status.emit("synced")
+                # refresh UI via signal after login
+                sig.status.emit("__refresh__")
+            else:
+                sig.status.emit(f"error:{error}")
+        sync_manager.login_oauth(provider, on_done)
+
+    def _after_login(self):
+        self._refresh_sync_ui()
+        self.status_bar.showMessage("Login successful, pulling data…", 2000)
+        sig = self._sync_sig
+        sig.status.emit("syncing")
+        def run():
+            count = sync_manager.pull_all()
+            sig.status.emit(f"__pulled:{count}")
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_sync_status(self, status: str):
+        if status == "syncing":
+            self._sync_btn.setText("⟳  Syncing…")
+        elif status == "synced":
+            email = sync_manager.get_user_email() or ""
+            self._sync_btn.setText(f"☁  {email}")
+            self.status_bar.showMessage("Synced", 2000)
+        elif status.startswith("error:"):
+            self._sync_btn.setText("☁  Sync error")
+            self.status_bar.showMessage(f"Sync error: {status[6:]}", 4000)
+        elif status == "__refresh__":
+            self._refresh_sync_ui()
+        elif status.startswith("__pulled:"):
+            count = status.split(":")[1]
+            self._refresh_sync_ui()
+            self.status_bar.showMessage(f"Sync complete: {count} note(s) updated", 3000)
+            self._load_notebooks()
+            self.sidebar.refresh_tags()
+
+    def _do_logout(self):
+        sync_manager.logout()
+        self._refresh_sync_ui()
+        self.status_bar.showMessage("Signed out", 2000)
+
+    def _sync_now(self):
+        if not sync_manager.is_logged_in():
+            return
+        sig = self._sync_sig
+        sig.status.emit("syncing")
+        def run():
+            count = sync_manager.pull_all()
+            sync_manager.push_all()
+            sig.status.emit(f"__pulled:{count}")
+        threading.Thread(target=run, daemon=True).start()
+
+    def _open_setup(self):
+        t = THEMES[self._theme_name]
+        dlg = SyncSetupDialog(self, t=t)
+        s = load_settings()
+        dlg.url_input.setText(s.get("supabase_url", ""))
+        dlg.key_input.setText(s.get("supabase_key", ""))
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            url, key = dlg.values()
+            ok, err = sync_manager.configure(url, key)
+            if ok:
+                self.status_bar.showMessage("Supabase connected", 2000)
+            else:
+                QMessageBox.warning(self, "Connection Failed", err)
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────

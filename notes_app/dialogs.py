@@ -2,9 +2,9 @@ from PyQt6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QDialogButtonBox, QLineEdit, QSpinBox, QComboBox,
     QPushButton, QLabel, QTabWidget, QTreeWidget, QTreeWidgetItem,
-    QHeaderView,
+    QHeaderView, QMessageBox,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 
 from notes_app.themes import THEMES
@@ -357,3 +357,174 @@ class SettingsDialog(QDialog):
 
     def values(self):
         return self.theme_combo.currentData(), self.font_spin.value(), self._get_disabled()
+
+
+# ─── Supabase Setup Dialog ─────────────────────────────────────────────────────
+
+class SyncSetupDialog(QDialog):
+    def __init__(self, parent=None, t=None):
+        super().__init__(parent)
+        t = t or THEMES["dark"]
+        self.setWindowTitle("Setup Supabase")
+        self.setModal(True)
+        self.setFixedSize(460, 200)
+        self.setStyleSheet(_dialog_style(t))
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(20, 16, 20, 16)
+
+        info = QLabel(
+            "Get your URL and Anon Key from\n"
+            "Supabase Dashboard → Project Settings → API"
+        )
+        info.setStyleSheet(f"color: {t['muted']}; font-size: 11px;")
+        layout.addWidget(info)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        self.url_input = QLineEdit()
+        self.url_input.setPlaceholderText("https://xxxx.supabase.co")
+        form.addRow("Project URL:", self.url_input)
+
+        self.key_input = QLineEdit()
+        self.key_input.setPlaceholderText("eyJhbGciOiJIUzI1NiIs...")
+        self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        form.addRow("Anon Key:", self.key_input)
+
+        layout.addLayout(form)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        self._save_btn = btns.button(QDialogButtonBox.StandardButton.Save)
+        self._save_btn.setText("Save & Connect")
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+
+        self.url_input.textChanged.connect(self._check_ready)
+        self.key_input.textChanged.connect(self._check_ready)
+        self._check_ready()
+
+    def _check_ready(self):
+        ok = bool(self.url_input.text().strip() and self.key_input.text().strip())
+        self._save_btn.setEnabled(ok)
+
+    def values(self) -> tuple[str, str]:
+        return self.url_input.text().strip(), self.key_input.text().strip()
+
+
+# ─── Login Dialog ──────────────────────────────────────────────────────────────
+
+class LoginDialog(QDialog):
+    oauth_requested = pyqtSignal(str)  # provider name
+
+    def __init__(self, parent=None, t=None):
+        super().__init__(parent)
+        t = t or THEMES["dark"]
+        self._t = t
+        self.setWindowTitle("Login — LemaNotes Sync")
+        self.setModal(True)
+        self.setFixedSize(380, 320)
+        self.setStyleSheet(_dialog_style(t))
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(24, 20, 24, 16)
+
+        title = QLabel("☁  Sync Across Devices")
+        title.setStyleSheet(f"color: {t['accent']}; font-weight: 700; font-size: 14px;")
+        layout.addWidget(title)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        self.email_input = QLineEdit()
+        self.email_input.setPlaceholderText("you@example.com")
+        form.addRow("Email:", self.email_input)
+
+        self.pass_input = QLineEdit()
+        self.pass_input.setPlaceholderText("Password")
+        self.pass_input.setEchoMode(QLineEdit.EchoMode.Password)
+        form.addRow("Password:", self.pass_input)
+
+        layout.addLayout(form)
+
+        self._err_lbl = QLabel("")
+        self._err_lbl.setStyleSheet(f"color: #e84040; font-size: 11px;")
+        self._err_lbl.setWordWrap(True)
+        self._err_lbl.hide()
+        layout.addWidget(self._err_lbl)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        self._login_btn = QPushButton("Login")
+        self._login_btn.setEnabled(False)
+        self._login_btn.clicked.connect(self.accept)
+        self._register_btn = QPushButton("Register")
+        self._register_btn.setEnabled(False)
+        self._register_btn.setProperty("secondary", True)
+        self._register_btn.clicked.connect(lambda: self.done(2))
+        btn_row.addWidget(self._login_btn)
+        btn_row.addWidget(self._register_btn)
+        layout.addLayout(btn_row)
+
+        sep_lbl = QLabel("── or continue with ──")
+        sep_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sep_lbl.setStyleSheet(f"color: {t['muted2']}; font-size: 10px;")
+        layout.addWidget(sep_lbl)
+
+        oauth_row = QHBoxLayout()
+        oauth_row.setSpacing(8)
+        gh_btn = QPushButton("⬛  GitHub")
+        gh_btn.clicked.connect(lambda: self._on_oauth("github"))
+        gg_btn = QPushButton("🔵  Google")
+        gg_btn.clicked.connect(lambda: self._on_oauth("google"))
+        oauth_row.addWidget(gh_btn)
+        oauth_row.addWidget(gg_btn)
+        layout.addLayout(oauth_row)
+
+        setup_btn = QPushButton("⚙  Configure Supabase URL & Key")
+        setup_btn.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {t['muted']}; "
+            f"border: none; font-size: 10px; padding: 0; }}"
+            f"QPushButton:hover {{ color: {t['accent']}; }}"
+        )
+        setup_btn.clicked.connect(lambda: self.done(3))
+        layout.addWidget(setup_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.email_input.textChanged.connect(self._check_ready)
+        self.pass_input.textChanged.connect(self._check_ready)
+        self.pass_input.returnPressed.connect(self._login_btn.click)
+
+        self._login_btn.setStyleSheet(self._btn_style(t, primary=True))
+        self._register_btn.setStyleSheet(self._btn_style(t, primary=False))
+        gh_btn.setStyleSheet(self._btn_style(t, primary=False))
+        gg_btn.setStyleSheet(self._btn_style(t, primary=False))
+
+    def _btn_style(self, t: dict, primary: bool) -> str:
+        bg = t["accent"] if primary else t["item_sel"]
+        fg = t["accent_fg"] if primary else t["text"]
+        hover = t["accent_hover"] if primary else t["border2"]
+        return (f"QPushButton {{ background: {bg}; color: {fg}; border: 1px solid {t['border']}; "
+                f"border-radius: 4px; padding: 5px 14px; font-size: 12px; }}"
+                f"QPushButton:hover {{ background: {hover}; }}"
+                f"QPushButton:disabled {{ color: {t['muted2']}; }}")
+
+    def _check_ready(self):
+        ok = bool(self.email_input.text().strip() and self.pass_input.text())
+        self._login_btn.setEnabled(ok)
+        self._register_btn.setEnabled(ok)
+
+    def _on_oauth(self, provider: str):
+        self.oauth_requested.emit(provider)
+        self.accept()
+
+    def show_error(self, msg: str):
+        self._err_lbl.setText(msg)
+        self._err_lbl.show()
+
+    def values(self) -> tuple[str, str]:
+        return self.email_input.text().strip(), self.pass_input.text()
