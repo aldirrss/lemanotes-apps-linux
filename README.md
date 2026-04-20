@@ -20,18 +20,50 @@ A Linux desktop notes app built with PyQt6, inspired by Notes-Up.
     <note-title>.meta.json
 ```
 
-## Setup
+## Installation
+
+### 1. System Dependencies (Ubuntu/Debian)
+
+Install required system libraries before running the app:
 
 ```bash
-# Install dependencies
+# Required: Qt XCB platform plugin dependencies
+sudo apt install -y libxcb-cursor0
+
+# Required: Qt WebEngine (if pip version doesn't bundle it)
+sudo apt install -y python3-pyqt6.qtwebengine
+
+# Optional but recommended: additional Qt XCB libraries
+sudo apt install -y libxcb-xinerama0 libxcb-icccm4 libxcb-image0 \
+                    libxcb-keysyms1 libxcb-render-util0
+```
+
+### 2. Python Dependencies
+
+```bash
 pip install -r requirements.txt
+```
 
-# On Ubuntu/Debian, PyQt6-WebEngine may require:
-sudo apt install python3-pyqt6.qtwebengine
+Using conda:
 
-# Run
+```bash
+conda activate python3.11
+pip install -r requirements.txt
+```
+
+### 3. Run
+
+```bash
 python run.py
 ```
+
+### Troubleshooting
+
+| Error | Fix |
+|---|---|
+| `Could not load the Qt platform plugin "xcb"` | `sudo apt install -y libxcb-cursor0` |
+| `PyQt6-WebEngine` not found | `sudo apt install -y python3-pyqt6.qtwebengine` |
+| Blank white editor area | Ensure `assets/tui/` contains Toast UI Editor files |
 
 ## Shortcuts
 | Shortcut | Action |
@@ -42,7 +74,7 @@ python run.py
 
 ## Project Structure
 ```
-notesup-clone/
+lemanotes-app/
 ├── run.py                  # Entry point
 ├── requirements.txt
 └── notes_app/

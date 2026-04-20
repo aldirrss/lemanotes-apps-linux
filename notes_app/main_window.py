@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QScrollArea, QDialog, QDialogButtonBox, QInputDialog,
     QMessageBox, QMenu, QToolBar, QStatusBar, QSizePolicy,
     QTreeWidget, QTreeWidgetItem, QFileDialog,
-    QSpinBox, QComboBox, QFormLayout,
+    QSpinBox, QComboBox, QFormLayout, QTabWidget, QHeaderView,
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage
@@ -113,6 +113,30 @@ THEMES = {
         "theme_icon":   "\u2600",
     },
 }
+
+
+# ─── Shortcut Registry ────────────────────────────────────────────────────────
+
+SHORTCUTS = [
+    {"key": "Ctrl+B",       "label": "Bold",              "category": "Format"},
+    {"key": "Ctrl+I",       "label": "Italic",            "category": "Format"},
+    {"key": "Ctrl+Shift+S", "label": "Strikethrough",     "category": "Format"},
+    {"key": "Ctrl+Shift+H", "label": "Highlight",         "category": "Format"},
+    {"key": "Ctrl+K",       "label": "Insert Link",       "category": "Insert"},
+    {"key": "Ctrl+Shift+I", "label": "Insert Image",      "category": "Insert"},
+    {"key": "Ctrl+Shift+C", "label": "Insert Code Block", "category": "Insert"},
+    {"key": "Ctrl+F",       "label": "Find",              "category": "Find"},
+    {"key": "Ctrl+H",       "label": "Find & Replace",    "category": "Find"},
+    {"key": "Ctrl+Z",       "label": "Undo",              "category": "Edit"},
+    {"key": "Ctrl+Shift+Z", "label": "Redo",              "category": "Edit"},
+    {"key": "Ctrl+N",       "label": "New Note",          "category": "App"},
+    {"key": "Ctrl+Shift+N", "label": "New Notebook",      "category": "App"},
+    {"key": "Ctrl+E",       "label": "Export PDF",        "category": "App"},
+    {"key": "Ctrl+,",       "label": "Settings",          "category": "App"},
+    {"key": "Ctrl+Shift+D", "label": "Cycle Theme",       "category": "App"},
+]
+
+_MANDATORY_SHORTCUTS = {"Ctrl+,", "Ctrl+Z"}
 
 
 # ─── Insert Dialogs ───────────────────────────────────────────────────────────
@@ -264,22 +288,34 @@ class InsertCodeBlockDialog(QDialog):
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, parent=None, t=None, current_theme="dark", current_font_size=15):
+    def __init__(self, parent=None, t=None, current_theme="dark",
+                 current_font_size=15, disabled_shortcuts=None):
         super().__init__(parent)
         t = t or THEMES["dark"]
+        self._t = t
         self._original_theme = current_theme
         self._original_font_size = current_font_size
+        self._original_disabled = list(disabled_shortcuts or [])
         self._preview_cb = None
+        self._shortcuts_cb = None
 
         self.setWindowTitle("Settings")
         self.setModal(True)
-        self.setFixedSize(360, 170)
+        self.resize(520, 440)
+        self.setMinimumSize(480, 380)
         self.setStyleSheet(_dialog_style(t))
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+        layout.setContentsMargins(16, 12, 16, 12)
 
+        self._tabs = QTabWidget()
+        self._tabs.setStyleSheet(self._tab_style())
+
+        # ── Tab 1: Appearance ──
+        ap_widget = QWidget()
+        ap_layout = QVBoxLayout(ap_widget)
+        ap_layout.setContentsMargins(16, 16, 16, 8)
         form = QFormLayout()
         form.setSpacing(10)
 
@@ -297,7 +333,63 @@ class SettingsDialog(QDialog):
         self.font_spin.setSuffix(" px")
         form.addRow("Font size:", self.font_spin)
 
-        layout.addLayout(form)
+        ap_layout.addLayout(form)
+        ap_layout.addStretch()
+        self._tabs.addTab(ap_widget, "Appearance")
+
+        self.theme_combo.currentIndexChanged.connect(self._on_preview)
+        self.font_spin.valueChanged.connect(self._on_preview)
+
+        # ── Tab 2: Shortcuts ──
+        sc_widget = QWidget()
+        sc_layout = QVBoxLayout(sc_widget)
+        sc_layout.setContentsMargins(8, 8, 8, 4)
+
+        self._sc_tree = QTreeWidget()
+        self._sc_tree.setColumnCount(3)
+        self._sc_tree.setHeaderLabels(["Action", "Shortcut", "Enabled"])
+        self._sc_tree.setRootIsDecorated(True)
+        self._sc_tree.setAnimated(True)
+        self._sc_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._sc_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self._sc_tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self._sc_tree.header().resizeSection(2, 64)
+        self._sc_tree.setStyleSheet(self._tree_style())
+
+        disabled_set = set(disabled_shortcuts or [])
+        categories: dict[str, QTreeWidgetItem] = {}
+        for sc in SHORTCUTS:
+            cat = sc["category"]
+            if cat not in categories:
+                cat_item = QTreeWidgetItem(self._sc_tree, [cat, "", ""])
+                cat_item.setExpanded(True)
+                f = cat_item.font(0)
+                f.setBold(True)
+                cat_item.setFont(0, f)
+                cat_item.setForeground(0, QColor(t["accent"]))
+                categories[cat] = cat_item
+
+            row = QTreeWidgetItem(categories[cat])
+            row.setText(0, sc["label"])
+            row.setText(1, sc["key"])
+            row.setData(0, Qt.ItemDataRole.UserRole, sc["key"])
+            is_mandatory = sc["key"] in _MANDATORY_SHORTCUTS
+            is_enabled = sc["key"] not in disabled_set or is_mandatory
+            row.setCheckState(2, Qt.CheckState.Checked if is_enabled else Qt.CheckState.Unchecked)
+            if is_mandatory:
+                row.setFlags(row.flags() & ~Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                row.setToolTip(2, "This shortcut cannot be disabled")
+
+        sc_layout.addWidget(self._sc_tree)
+
+        hint = QLabel("Uncheck to disable a shortcut. Greyed-out shortcuts are always active.")
+        hint.setStyleSheet(f"color: {t['muted2']}; font-size: 10px; padding: 2px 4px;")
+        sc_layout.addWidget(hint)
+        self._tabs.addTab(sc_widget, "Shortcuts")
+
+        self._sc_tree.itemChanged.connect(self._on_shortcut_changed)
+
+        layout.addWidget(self._tabs)
 
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -306,23 +398,78 @@ class SettingsDialog(QDialog):
         btns.rejected.connect(self._on_cancel)
         layout.addWidget(btns)
 
-        self.theme_combo.currentIndexChanged.connect(self._on_preview)
-        self.font_spin.valueChanged.connect(self._on_preview)
+    def _tab_style(self) -> str:
+        t = self._t
+        return f"""
+            QTabWidget::pane {{
+                border: 1px solid {t['border']}; background: {t['bg3']};
+                border-radius: 0 4px 4px 4px;
+            }}
+            QTabBar::tab {{
+                background: {t['bg']}; color: {t['muted']};
+                padding: 6px 18px; border: 1px solid {t['border']};
+                border-bottom: none; border-radius: 4px 4px 0 0; margin-right: 2px;
+            }}
+            QTabBar::tab:selected {{ background: {t['bg3']}; color: {t['accent']}; font-weight: 600; }}
+            QTabBar::tab:hover:!selected {{ color: {t['text']}; }}
+        """
+
+    def _tree_style(self) -> str:
+        t = self._t
+        return f"""
+            QTreeWidget {{
+                background: {t['bg']}; color: {t['text']};
+                border: 1px solid {t['border']}; border-radius: 4px; outline: none;
+            }}
+            QTreeWidget::item {{ padding: 3px 4px; }}
+            QTreeWidget::item:selected {{ background: {t['item_sel']}; color: {t['accent']}; }}
+            QTreeWidget::item:hover:!selected {{ background: {t['item_hover']}; }}
+            QHeaderView::section {{
+                background: {t['bg2']}; color: {t['muted']};
+                border: none; border-bottom: 1px solid {t['border']};
+                padding: 4px 8px; font-size: 11px;
+            }}
+            QScrollBar:vertical {{ background: {t['bg']}; width: 4px; }}
+            QScrollBar::handle:vertical {{ background: {t['border']}; border-radius: 2px; }}
+        """
 
     def set_preview_callback(self, cb):
         self._preview_cb = cb
+
+    def set_shortcuts_callback(self, cb):
+        self._shortcuts_cb = cb
 
     def _on_preview(self):
         if self._preview_cb:
             self._preview_cb(self.theme_combo.currentData(), self.font_spin.value())
 
+    def _on_shortcut_changed(self, item: QTreeWidgetItem, column: int):
+        if column != 2 or not item.data(0, Qt.ItemDataRole.UserRole):
+            return
+        if self._shortcuts_cb:
+            self._shortcuts_cb(self._get_disabled())
+
+    def _get_disabled(self) -> list[str]:
+        disabled = []
+        root = self._sc_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            cat_item = root.child(i)
+            for j in range(cat_item.childCount()):
+                row = cat_item.child(j)
+                key = row.data(0, Qt.ItemDataRole.UserRole)
+                if key and row.checkState(2) == Qt.CheckState.Unchecked:
+                    disabled.append(key)
+        return disabled
+
     def _on_cancel(self):
         if self._preview_cb:
             self._preview_cb(self._original_theme, self._original_font_size)
+        if self._shortcuts_cb:
+            self._shortcuts_cb(self._original_disabled)
         self.reject()
 
     def values(self):
-        return self.theme_combo.currentData(), self.font_spin.value()
+        return self.theme_combo.currentData(), self.font_spin.value(), self._get_disabled()
 
 
 # ─── Tag Pill Widget ──────────────────────────────────────────────────────────
@@ -669,6 +816,9 @@ class SidebarPanel(QWidget):
     tag_selected = pyqtSignal(str)
     tag_cleared = pyqtSignal()
     theme_toggle_requested = pyqtSignal()
+    notebook_sort_changed = pyqtSignal(str)   # sort mode
+    pinned_all_requested = pyqtSignal()
+    pinned_all_cleared = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -693,12 +843,19 @@ class SidebarPanel(QWidget):
         self._theme_btn.setToolTip("Cycle theme (Ctrl+Shift+D)")
         self._theme_btn.clicked.connect(self.theme_toggle_requested)
         hl.addWidget(self._theme_btn)
+        self._nb_sort_btn = QPushButton("\u21c5")
+        self._nb_sort_btn.setFixedSize(24, 24)
+        self._nb_sort_btn.setToolTip("Sort notebooks")
+        self._nb_sort_btn.clicked.connect(self._show_notebook_sort_menu)
+        hl.addWidget(self._nb_sort_btn)
         self._add_btn = QPushButton("+")
         self._add_btn.setFixedSize(24, 24)
         self._add_btn.setToolTip("New notebook")
         self._add_btn.clicked.connect(self.new_notebook_requested)
         hl.addWidget(self._add_btn)
         layout.addWidget(self._header)
+
+        self._active_pinned_filter = False
 
         self._sep = QFrame()
         self._sep.setFrameShape(QFrame.Shape.HLine)
@@ -761,6 +918,7 @@ class SidebarPanel(QWidget):
             QPushButton:hover {{ background: {t['item_sel']}; }}
         """
         self._theme_btn.setStyleSheet(_icon_btn)
+        self._nb_sort_btn.setStyleSheet(_icon_btn)
         self._add_btn.setStyleSheet(_icon_btn.replace("13px", "16px"))
         self._theme_btn.setText(t["theme_icon"])
         self._sep.setStyleSheet(f"background: {t['border']};")
@@ -867,26 +1025,48 @@ class SidebarPanel(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         self._tag_buttons.clear()
+
+        # ★ Pinned Notes special filter
+        pin_btn = QPushButton("  \u2605 Pinned Notes")
+        pin_btn.setCheckable(True)
+        pin_btn.setChecked(self._active_pinned_filter)
+        pin_btn.setStyleSheet(self._tag_btn_style(t, special=True))
+        pin_btn.clicked.connect(self._on_pinned_filter_clicked)
+        self._tags_layout.addWidget(pin_btn)
+        self._pin_filter_btn_ref = pin_btn
+
         for tag in storage.get_all_tags():
             btn = QPushButton(f"  {tag}")
             btn.setCheckable(True)
             btn.setChecked(tag == self._active_tag)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: {t['code_bg']}; color: {t['accent']};
-                    border: 1px solid {t['border']}; border-radius: 10px;
-                    font-size: 11px; padding: 2px 8px; text-align: left;
-                }}
-                QPushButton:checked {{
-                    background: {t['accent']}; color: {t['accent_fg']};
-                    border-color: {t['accent']};
-                }}
-                QPushButton:hover:!checked {{ background: {t['item_sel']}; }}
-            """)
+            btn.setStyleSheet(self._tag_btn_style(t))
             btn.clicked.connect(lambda _, tg=tag: self._on_tag_clicked(tg))
             self._tags_layout.addWidget(btn)
             self._tag_buttons[tag] = btn
         self._tags_layout.addStretch()
+
+    def _tag_btn_style(self, t: dict, special: bool = False) -> str:
+        fg = t["accent"] if not special else "#FFD700"
+        return f"""
+            QPushButton {{
+                background: {t['code_bg']}; color: {fg};
+                border: 1px solid {t['border']}; border-radius: 10px;
+                font-size: 11px; padding: 2px 8px; text-align: left;
+            }}
+            QPushButton:checked {{
+                background: {t['accent']}; color: {t['accent_fg']};
+                border-color: {t['accent']};
+            }}
+            QPushButton:hover:!checked {{ background: {t['item_sel']}; }}
+        """
+
+    def _on_pinned_filter_clicked(self):
+        self._active_pinned_filter = not self._active_pinned_filter
+        if self._active_pinned_filter:
+            self.clear_tag_selection()
+            self.pinned_all_requested.emit()
+        else:
+            self.pinned_all_cleared.emit()
 
     def clear_tag_selection(self):
         if self._active_tag and self._active_tag in self._tag_buttons:
@@ -905,10 +1085,34 @@ class SidebarPanel(QWidget):
                 self._tag_buttons[tag].setChecked(True)
             self.tag_selected.emit(tag)
 
+    def clear_pinned_filter(self):
+        self._active_pinned_filter = False
+        if hasattr(self, "_pin_filter_btn_ref"):
+            self._pin_filter_btn_ref.setChecked(False)
+
     def _toggle_tags_section(self):
         visible = not self._tags_scroll.isVisible()
         self._tags_scroll.setVisible(visible)
         self._tags_toggle_btn.setText("\u25be" if visible else "\u25b8")
+
+    def _show_notebook_sort_menu(self):
+        t = self._theme
+        menu = QMenu(self)
+        menu.setStyleSheet(f"""
+            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; }}
+            QMenu::item:selected {{ background: {t['item_sel']}; }}
+        """)
+        a_z = menu.addAction("Sort A \u2192 Z")
+        z_a = menu.addAction("Sort Z \u2192 A")
+        manual = menu.addAction("Manual order")
+        act = menu.exec(self._nb_sort_btn.mapToGlobal(
+            self._nb_sort_btn.rect().bottomLeft()))
+        if act == a_z:
+            self.notebook_sort_changed.emit("name_asc")
+        elif act == z_a:
+            self.notebook_sort_changed.emit("name_desc")
+        elif act == manual:
+            self.notebook_sort_changed.emit("manual")
 
     # ── Context Menu ───────────────────────────────────────────────────────────
 
@@ -983,10 +1187,23 @@ class SidebarPanel(QWidget):
 
 # ─── Note List Panel ──────────────────────────────────────────────────────────
 
+_PRIORITY_COLORS = {1: "#F5C518", 2: "#E87C2B", 3: "#E84040"}
+_SORT_LABELS = {
+    "updated_desc":  "Updated (newest first)",
+    "updated_asc":   "Updated (oldest first)",
+    "title_asc":     "Title A \u2192 Z",
+    "title_desc":    "Title Z \u2192 A",
+    "priority_desc": "Priority (highest first)",
+    "created_desc":  "Created (newest first)",
+}
+
+
 class NoteListPanel(QWidget):
-    note_selected = pyqtSignal(str, str, str)    # (notebook, section, slug)
+    note_selected = pyqtSignal(str, str, str)
     new_note_requested = pyqtSignal()
-    delete_note_requested = pyqtSignal(str, str, str)  # (notebook, section, slug)
+    delete_note_requested = pyqtSignal(str, str, str)
+    pin_note_requested = pyqtSignal(str, str, str)           # (nb, section, slug)
+    priority_changed = pyqtSignal(str, str, str, int)        # (nb, section, slug, priority)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -994,6 +1211,10 @@ class NoteListPanel(QWidget):
         self.setMinimumWidth(220)
         self.setMaximumWidth(300)
         self._current_notebook = None
+
+        s = load_settings()
+        self._sort_order: str  = s.get("note_sort", "updated_desc")
+        self._filter_pinned: bool = s.get("filter_pinned", False)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1014,12 +1235,31 @@ class NoteListPanel(QWidget):
 
         self._search_wrap = QWidget()
         sl = QHBoxLayout(self._search_wrap)
-        sl.setContentsMargins(12, 8, 12, 8)
+        sl.setContentsMargins(12, 6, 12, 6)
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("\U0001f50d  Search notes\u2026")
         self.search_input.textChanged.connect(self._on_search)
         sl.addWidget(self.search_input)
         layout.addWidget(self._search_wrap)
+
+        # Sort / Filter bar
+        self._sortbar = QWidget()
+        self._sortbar.setFixedHeight(32)
+        sbl = QHBoxLayout(self._sortbar)
+        sbl.setContentsMargins(12, 0, 12, 0)
+        sbl.setSpacing(6)
+        self._pin_filter_btn = QPushButton("\u2605 Pinned")
+        self._pin_filter_btn.setCheckable(True)
+        self._pin_filter_btn.setChecked(self._filter_pinned)
+        self._pin_filter_btn.setFixedHeight(22)
+        self._pin_filter_btn.clicked.connect(self._on_pin_filter_toggled)
+        sbl.addWidget(self._pin_filter_btn)
+        self._sort_btn = QPushButton("\u21c5 Sort")
+        self._sort_btn.setFixedHeight(22)
+        self._sort_btn.clicked.connect(self._show_sort_menu)
+        sbl.addWidget(self._sort_btn)
+        sbl.addStretch()
+        layout.addWidget(self._sortbar)
 
         self._sep = QFrame()
         self._sep.setFrameShape(QFrame.Shape.HLine)
@@ -1061,6 +1301,21 @@ class NoteListPanel(QWidget):
             }}
             QLineEdit:focus {{ border-color: {t['accent']}; }}
         """)
+        self._sortbar.setStyleSheet(f"background: {t['bg4']};")
+        _sb_btn = f"""
+            QPushButton {{
+                background: {t['item_sel']}; color: {t['muted']};
+                border: 1px solid {t['border']}; border-radius: 10px;
+                font-size: 10px; padding: 0 8px;
+            }}
+            QPushButton:hover {{ color: {t['accent']}; border-color: {t['accent']}; }}
+            QPushButton:checked {{
+                background: {t['accent']}; color: {t['accent_fg']};
+                border-color: {t['accent']};
+            }}
+        """
+        self._pin_filter_btn.setStyleSheet(_sb_btn)
+        self._sort_btn.setStyleSheet(_sb_btn)
         self._sep.setStyleSheet(f"background: {t['border']};")
         self.list_widget.setStyleSheet(f"""
             QListWidget {{ background: {t['bg4']}; border: none; }}
@@ -1084,12 +1339,23 @@ class NoteListPanel(QWidget):
         label = f"{notebook} / {section}" if section else notebook
         self.nb_label.setText(label)
         self._notes = storage.list_notes(notebook, section)
-        self._render_notes(self._notes)
+        self._render_notes(self._apply_sort_filter(self._notes))
 
     def filter_by_tag(self, tag: str):
         self._tag_filter = tag
         self.nb_label.setText(f"Tag: {tag}")
-        self._render_notes(storage.filter_by_tag(tag))
+        self._render_notes(self._apply_sort_filter(storage.filter_by_tag(tag)))
+
+    def filter_pinned_all(self):
+        self._tag_filter = None
+        self.nb_label.setText("\u2605 Pinned Notes")
+        from notes_app import storage as _s
+        all_notes = []
+        for nb in _s.list_notebooks():
+            all_notes += [n for n in _s.list_notes(nb) if n.get("pinned")]
+            for sec in _s.list_sections(nb):
+                all_notes += [n for n in _s.list_notes(nb, sec) if n.get("pinned")]
+        self._render_notes(self._apply_sort_filter(all_notes))
 
     def clear_tag_filter(self):
         self._tag_filter = None
@@ -1098,14 +1364,37 @@ class NoteListPanel(QWidget):
                      if self._current_section else self._current_notebook)
             self.nb_label.setText(label)
             self._notes = storage.list_notes(self._current_notebook, self._current_section)
-            self._render_notes(self._notes)
+            self._render_notes(self._apply_sort_filter(self._notes))
 
     def refresh(self):
         if self._tag_filter:
-            self._render_notes(storage.filter_by_tag(self._tag_filter))
+            self._render_notes(self._apply_sort_filter(storage.filter_by_tag(self._tag_filter)))
         elif self._current_notebook:
             self._notes = storage.list_notes(self._current_notebook, self._current_section)
-            self._render_notes(self._notes)
+            self._render_notes(self._apply_sort_filter(self._notes))
+
+    def _apply_sort_filter(self, notes: list[dict]) -> list[dict]:
+        if self._filter_pinned:
+            notes = [n for n in notes if n.get("pinned", False)]
+        sort = self._sort_order
+        key_map = {
+            "updated_desc":  (lambda n: n.get("updated_at", ""),  True),
+            "updated_asc":   (lambda n: n.get("updated_at", ""),  False),
+            "title_asc":     (lambda n: n.get("title", "").lower(), False),
+            "title_desc":    (lambda n: n.get("title", "").lower(), True),
+            "priority_desc": (lambda n: n.get("priority", 0),     True),
+            "created_desc":  (lambda n: n.get("created_at", ""),  True),
+        }
+        key_fn, reverse = key_map.get(sort, (lambda n: n.get("updated_at", ""), True))
+        pinned = sorted(
+            [n for n in notes if n.get("pinned", False)],
+            key=lambda n: -n.get("priority", 0)
+        )
+        normal = sorted(
+            [n for n in notes if not n.get("pinned", False)],
+            key=key_fn, reverse=reverse
+        )
+        return pinned + normal
 
     def _render_notes(self, notes: list[dict]):
         self.list_widget.clear()
@@ -1113,6 +1402,9 @@ class NoteListPanel(QWidget):
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole,
                          (note["notebook"], note.get("section") or "", note["slug"]))
+            item.setData(Qt.ItemDataRole.UserRole + 1,
+                         {"pinned": note.get("pinned", False),
+                          "priority": note.get("priority", 0)})
             widget = self._make_note_card(note)
             item.setSizeHint(widget.sizeHint())
             self.list_widget.addItem(item)
@@ -1120,16 +1412,44 @@ class NoteListPanel(QWidget):
 
     def _make_note_card(self, note: dict) -> QWidget:
         t = self._theme
-        card = QWidget()
-        card.setStyleSheet("background: transparent;")
-        vl = QVBoxLayout(card)
-        vl.setContentsMargins(12, 10, 12, 10)
+        priority = note.get("priority", 0)
+        pinned   = note.get("pinned", False)
+
+        outer = QWidget()
+        outer.setStyleSheet("background: transparent;")
+        hl = QHBoxLayout(outer)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(0)
+
+        # Priority color bar
+        if priority > 0:
+            bar = QFrame()
+            bar.setFixedWidth(4)
+            bar.setStyleSheet(
+                f"background: {_PRIORITY_COLORS[priority]}; border-radius: 2px; margin: 4px 0;"
+            )
+            hl.addWidget(bar)
+
+        content = QWidget()
+        content.setStyleSheet("background: transparent;")
+        vl = QVBoxLayout(content)
+        vl.setContentsMargins(12, 8, 12, 8)
         vl.setSpacing(3)
 
-        title = QLabel(note["title"])
-        title.setStyleSheet(f"color: {t['text2']}; font-weight: 600; font-size: 13px;")
-        title.setWordWrap(True)
-        vl.addWidget(title)
+        # Title row with optional pin icon
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(4)
+        title_lbl = QLabel(note["title"])
+        title_lbl.setStyleSheet(f"color: {t['text2']}; font-weight: 600; font-size: 13px;")
+        title_lbl.setWordWrap(True)
+        title_row.addWidget(title_lbl, 1)
+        if pinned:
+            pin_icon = QLabel("\U0001f4cc")
+            pin_icon.setStyleSheet("font-size: 10px;")
+            pin_icon.setFixedWidth(16)
+            title_row.addWidget(pin_icon)
+        vl.addLayout(title_row)
 
         if note.get("tags"):
             tag_row = QHBoxLayout()
@@ -1145,7 +1465,9 @@ class NoteListPanel(QWidget):
         date_lbl = QLabel(note.get("updated_at", "")[:10])
         date_lbl.setStyleSheet(f"color: {t['muted2']}; font-size: 10px;")
         vl.addWidget(date_lbl)
-        return card
+
+        hl.addWidget(content)
+        return outer
 
     def _on_select(self, row):
         if row >= 0:
@@ -1157,23 +1479,69 @@ class NoteListPanel(QWidget):
     def _on_search(self, query: str):
         if not query.strip():
             if self._current_notebook:
-                self._render_notes(self._notes)
+                self._render_notes(self._apply_sort_filter(self._notes))
             return
-        self._render_notes(storage.search_notes(query, self._current_notebook))
+        self._render_notes(self._apply_sort_filter(
+            storage.search_notes(query, self._current_notebook)
+        ))
 
-    def _show_context_menu(self, pos):
-        item = self.list_widget.itemAt(pos)
-        if not item:
-            return
-        nb, section, slug = item.data(Qt.ItemDataRole.UserRole)
+    def _on_pin_filter_toggled(self):
+        self._filter_pinned = self._pin_filter_btn.isChecked()
+        s = load_settings()
+        s["filter_pinned"] = self._filter_pinned
+        save_settings(s)
+        self.refresh()
+
+    def _show_sort_menu(self):
         t = self._theme
         menu = QMenu(self)
         menu.setStyleSheet(f"""
             QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; }}
             QMenu::item:selected {{ background: {t['item_sel']}; }}
         """)
+        acts = {}
+        for key, label in _SORT_LABELS.items():
+            a = menu.addAction(("\u2713 " if key == self._sort_order else "   ") + label)
+            acts[a] = key
+        chosen = menu.exec(self._sort_btn.mapToGlobal(self._sort_btn.rect().bottomLeft()))
+        if chosen in acts:
+            self._sort_order = acts[chosen]
+            s = load_settings()
+            s["note_sort"] = self._sort_order
+            save_settings(s)
+            self.refresh()
+
+    def _show_context_menu(self, pos):
+        item = self.list_widget.itemAt(pos)
+        if not item:
+            return
+        nb, section, slug = item.data(Qt.ItemDataRole.UserRole)
+        extra = item.data(Qt.ItemDataRole.UserRole + 1) or {}
+        is_pinned  = extra.get("pinned", False)
+        priority   = extra.get("priority", 0)
+        t = self._theme
+        menu_ss = f"""
+            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; }}
+            QMenu::item:selected {{ background: {t['item_sel']}; }}
+        """
+        menu = QMenu(self)
+        menu.setStyleSheet(menu_ss)
+        pin_act  = menu.addAction("\U0001f4cc  Unpin" if is_pinned else "\U0001f4cc  Pin")
+        prio_menu = menu.addMenu("  Priority")
+        prio_menu.setStyleSheet(menu_ss)
+        prio_acts = {}
+        for lvl, lbl in [(0, "None"), (1, "Low \u25cf"), (2, "Medium \u25cf"), (3, "High \u25cf")]:
+            a = prio_menu.addAction(("\u2713 " if lvl == priority else "   ") + lbl)
+            prio_acts[a] = lvl
+        menu.addSeparator()
         del_act = menu.addAction("\U0001f5d1  Delete Note")
-        if menu.exec(self.list_widget.mapToGlobal(pos)) == del_act:
+
+        act = menu.exec(self.list_widget.mapToGlobal(pos))
+        if act == pin_act:
+            self.pin_note_requested.emit(nb, section, slug)
+        elif act in prio_acts:
+            self.priority_changed.emit(nb, section, slug, prio_acts[act])
+        elif act == del_act:
             if QMessageBox.question(self, "Delete", "Delete this note?") == QMessageBox.StandardButton.Yes:
                 self.delete_note_requested.emit(nb, section, slug)
 
@@ -1208,6 +1576,7 @@ class EditorPanel(QWidget):
     note_loaded = pyqtSignal(bool)
     pdf_export_done = pyqtSignal(str, bool)
     word_count_updated = pyqtSignal(str)
+    pin_toggled = pyqtSignal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1219,6 +1588,8 @@ class EditorPanel(QWidget):
         self._slug = None
         self._editor_ready = False
         self._pending_content: str | None = None
+
+        self._pinned = False
 
         self._auto_save_timer = QTimer()
         self._auto_save_timer.setSingleShot(True)
@@ -1241,6 +1612,11 @@ class EditorPanel(QWidget):
         self.title_input.setPlaceholderText("Note title\u2026")
         self.title_input.textChanged.connect(self._schedule_save)
         tl.addWidget(self.title_input)
+        self._pin_btn = QPushButton("\u2606")
+        self._pin_btn.setFixedSize(28, 28)
+        self._pin_btn.setToolTip("Pin note")
+        self._pin_btn.clicked.connect(self._toggle_pin)
+        tl.addWidget(self._pin_btn)
         layout.addWidget(self._topbar)
 
         # ── Tag bar ──
@@ -1408,22 +1784,50 @@ class EditorPanel(QWidget):
         layout.addWidget(self.empty_label)
 
         # ── Keyboard shortcuts ──
-        QShortcut(QKeySequence("Ctrl+Z"),       self).activated.connect(lambda: self._js_cmd("undo"))
-        QShortcut(QKeySequence("Ctrl+Shift+Z"), self).activated.connect(lambda: self._js_cmd("redo"))
-        QShortcut(QKeySequence("Ctrl+B"),       self).activated.connect(lambda: self._js_cmd("bold"))
-        QShortcut(QKeySequence("Ctrl+I"),       self).activated.connect(lambda: self._js_cmd("italic"))
-        QShortcut(QKeySequence("Ctrl+Shift+S"), self).activated.connect(lambda: self._js_cmd("strike"))
-        QShortcut(QKeySequence("Ctrl+Shift+H"), self).activated.connect(self._js_highlight)
-        QShortcut(QKeySequence("Ctrl+K"),       self).activated.connect(self._insert_link)
-        QShortcut(QKeySequence("Ctrl+Shift+I"), self).activated.connect(self._insert_image)
-        QShortcut(QKeySequence("Ctrl+Shift+C"), self).activated.connect(self._insert_code_block)
-        QShortcut(QKeySequence("Ctrl+F"),       self).activated.connect(lambda: self.show_find_bar(False))
-        QShortcut(QKeySequence("Ctrl+H"),       self).activated.connect(lambda: self.show_find_bar(True))
-        QShortcut(QKeySequence("F3"),           self).activated.connect(self._find_next)
-        QShortcut(QKeySequence("Shift+F3"),     self).activated.connect(self._find_prev)
-        QShortcut(QKeySequence("Escape"),       self._find_bar).activated.connect(self.hide_find_bar)
+        self._sc_objects: list[QShortcut] = []
+        self._register_shortcuts([])
 
         self._apply_styles()
+
+    # ── Shortcuts ──────────────────────────────────────────────────────────────
+
+    def _build_shortcut_map(self) -> dict:
+        return {
+            "Ctrl+Z":       (lambda: self._js_cmd("undo"),      self),
+            "Ctrl+Shift+Z": (lambda: self._js_cmd("redo"),      self),
+            "Ctrl+B":       (lambda: self._js_cmd("bold"),      self),
+            "Ctrl+I":       (lambda: self._js_cmd("italic"),    self),
+            "Ctrl+Shift+S": (lambda: self._js_cmd("strike"),    self),
+            "Ctrl+Shift+H": (self._js_highlight,                self),
+            "Ctrl+K":       (self._insert_link,                 self),
+            "Ctrl+Shift+I": (self._insert_image,                self),
+            "Ctrl+Shift+C": (self._insert_code_block,           self),
+            "Ctrl+F":       (lambda: self.show_find_bar(False), self),
+            "Ctrl+H":       (lambda: self.show_find_bar(True),  self),
+        }
+
+    def _register_shortcuts(self, disabled: list[str]):
+        disabled_set = set(disabled)
+        for key, (slot, parent) in self._build_shortcut_map().items():
+            if key in disabled_set:
+                continue
+            sc = QShortcut(QKeySequence(key), parent)
+            sc.activated.connect(slot)
+            self._sc_objects.append(sc)
+        for key, slot in [("F3", self._find_next), ("Shift+F3", self._find_prev)]:
+            sc = QShortcut(QKeySequence(key), self)
+            sc.activated.connect(slot)
+            self._sc_objects.append(sc)
+        sc = QShortcut(QKeySequence("Escape"), self._find_bar)
+        sc.activated.connect(self.hide_find_bar)
+        self._sc_objects.append(sc)
+
+    def apply_shortcuts(self, disabled: list[str]):
+        for sc in self._sc_objects:
+            sc.setEnabled(False)
+            sc.deleteLater()
+        self._sc_objects = []
+        self._register_shortcuts(disabled)
 
     # ── Theme ──────────────────────────────────────────────────────────────────
 
@@ -1438,6 +1842,13 @@ class EditorPanel(QWidget):
                 background: transparent; border: none;
                 color: {t['text2']}; font-size: 17px; font-weight: 700;
             }}
+        """)
+        self._pin_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; border: none;
+                color: {t['muted2']}; font-size: 16px;
+            }}
+            QPushButton:hover {{ color: {t['accent']}; }}
         """)
         self._tag_wrap.setStyleSheet(
             f"background: {t['bg2']}; border-bottom: 1px solid {t['border3']};"
@@ -1523,6 +1934,9 @@ class EditorPanel(QWidget):
         self._notebook = notebook
         self._section = section
         self._slug = slug
+        self._pinned = note.get("pinned", False)
+        self._pin_btn.setText("\u2605" if self._pinned else "\u2606")
+        self._pin_btn.setToolTip("Unpin note" if self._pinned else "Pin note")
         self.title_input.blockSignals(True)
         self.title_input.setText(note.get("title", ""))
         self.title_input.blockSignals(False)
@@ -1543,6 +1957,9 @@ class EditorPanel(QWidget):
         self._notebook = None
         self._section = None
         self._slug = None
+        self._pinned = False
+        self._pin_btn.setText("\u2606")
+        self._pin_btn.setToolTip("Pin note")
         self._pending_content = None
         if self._editor_ready:
             self._inject_content("")
@@ -1556,6 +1973,15 @@ class EditorPanel(QWidget):
 
     def export_pdf(self, output_path: str):
         self._wysiwyg.page().printToPdf(output_path)
+
+    def _toggle_pin(self):
+        if not self._notebook or not self._slug:
+            return
+        new_pinned = storage.toggle_pin(self._notebook, self._slug, self._section)
+        self._pinned = new_pinned
+        self._pin_btn.setText("\u2605" if new_pinned else "\u2606")
+        self._pin_btn.setToolTip("Unpin note" if new_pinned else "Pin note")
+        self.pin_toggled.emit(new_pinned)
 
     # ── Find & Replace ─────────────────────────────────────────────────────────
 
@@ -1740,12 +2166,16 @@ class MainWindow(QMainWindow):
         settings = load_settings()
         self._theme_name = settings.get("theme", "dark")
         self._font_size = settings.get("font_size", 15)
+        self._disabled_shortcuts: list[str] = settings.get("disabled_shortcuts", [])
+        self._notebook_sort: str = settings.get("notebook_sort", "name_asc")
 
         self._build_ui()
         self._build_menu()
         self.editor_panel.note_loaded.connect(self._export_pdf_act.setEnabled)
         self.editor_panel.pdf_export_done.connect(self._on_pdf_exported)
         self.editor_panel.word_count_updated.connect(self._word_count_lbl.setText)
+        self.editor_panel.apply_shortcuts(self._disabled_shortcuts)
+        self._register_menu_shortcuts(self._disabled_shortcuts)
         self._load_notebooks()
         self._apply_theme(self._theme_name)
         self.editor_panel.set_font_size(self._font_size)
@@ -1765,6 +2195,9 @@ class MainWindow(QMainWindow):
         self.sidebar.tag_selected.connect(self._on_tag_selected)
         self.sidebar.tag_cleared.connect(self._on_tag_cleared)
         self.sidebar.theme_toggle_requested.connect(self._toggle_theme)
+        self.sidebar.pinned_all_requested.connect(self._on_pinned_all_requested)
+        self.sidebar.pinned_all_cleared.connect(self._on_pinned_all_cleared)
+        self.sidebar.notebook_sort_changed.connect(self._on_notebook_sort_changed)
         main_layout.addWidget(self.sidebar)
 
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -1774,10 +2207,13 @@ class MainWindow(QMainWindow):
         self.note_list.note_selected.connect(self._on_note_selected)
         self.note_list.new_note_requested.connect(self._create_note)
         self.note_list.delete_note_requested.connect(self._delete_note)
+        self.note_list.pin_note_requested.connect(self._on_pin_requested)
+        self.note_list.priority_changed.connect(self._on_priority_changed)
         self._splitter.addWidget(self.note_list)
 
         self.editor_panel = EditorPanel()
         self.editor_panel.note_saved.connect(self._on_note_saved)
+        self.editor_panel.pin_toggled.connect(self._on_note_pin_toggled)
         self._splitter.addWidget(self.editor_panel)
 
         self._splitter.setSizes([250, 950])
@@ -1795,15 +2231,15 @@ class MainWindow(QMainWindow):
         self._menubar = self.menuBar()
 
         file_menu = self._menubar.addMenu("File")
-        new_note_act = QAction("New Note", self)
-        new_note_act.setShortcut(QKeySequence("Ctrl+N"))
-        new_note_act.triggered.connect(self._create_note)
-        file_menu.addAction(new_note_act)
+        self._new_note_act = QAction("New Note", self)
+        self._new_note_act.setShortcut(QKeySequence("Ctrl+N"))
+        self._new_note_act.triggered.connect(self._create_note)
+        file_menu.addAction(self._new_note_act)
 
-        new_nb_act = QAction("New Notebook", self)
-        new_nb_act.setShortcut(QKeySequence("Ctrl+Shift+N"))
-        new_nb_act.triggered.connect(self._create_notebook)
-        file_menu.addAction(new_nb_act)
+        self._new_nb_act = QAction("New Notebook", self)
+        self._new_nb_act.setShortcut(QKeySequence("Ctrl+Shift+N"))
+        self._new_nb_act.triggered.connect(self._create_notebook)
+        file_menu.addAction(self._new_nb_act)
 
         file_menu.addSeparator()
         self._export_pdf_act = QAction("Export as PDF\u2026", self)
@@ -1813,15 +2249,15 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self._export_pdf_act)
 
         view_menu = self._menubar.addMenu("View")
-        toggle_theme_act = QAction("Cycle Theme", self)
-        toggle_theme_act.setShortcut(QKeySequence("Ctrl+Shift+D"))
-        toggle_theme_act.triggered.connect(self._toggle_theme)
-        view_menu.addAction(toggle_theme_act)
+        self._toggle_theme_act = QAction("Cycle Theme", self)
+        self._toggle_theme_act.setShortcut(QKeySequence("Ctrl+Shift+D"))
+        self._toggle_theme_act.triggered.connect(self._toggle_theme)
+        view_menu.addAction(self._toggle_theme_act)
 
-        settings_act = QAction("Settings\u2026", self)
-        settings_act.setShortcut(QKeySequence("Ctrl+,"))
-        settings_act.triggered.connect(self._open_settings)
-        view_menu.addAction(settings_act)
+        self._settings_act = QAction("Settings\u2026", self)
+        self._settings_act.setShortcut(QKeySequence("Ctrl+,"))
+        self._settings_act.triggered.connect(self._open_settings)
+        view_menu.addAction(self._settings_act)
 
         self._update_menu_style()
 
@@ -1856,6 +2292,21 @@ class MainWindow(QMainWindow):
         cycle = {"dark": "light", "light": "sepia", "sepia": "dark"}
         self._apply_theme(cycle.get(self._theme_name, "dark"))
 
+    def _register_menu_shortcuts(self, disabled: list[str]):
+        disabled_set = set(disabled)
+        menu_map = {
+            "Ctrl+N":       self._new_note_act,
+            "Ctrl+Shift+N": self._new_nb_act,
+            "Ctrl+E":       self._export_pdf_act,
+            "Ctrl+Shift+D": self._toggle_theme_act,
+            "Ctrl+,":       self._settings_act,
+        }
+        for key, act in menu_map.items():
+            if key in disabled_set and key not in _MANDATORY_SHORTCUTS:
+                act.setShortcut(QKeySequence())
+            else:
+                act.setShortcut(QKeySequence(key))
+
     def _open_settings(self):
         s = load_settings()
         dlg = SettingsDialog(
@@ -1863,26 +2314,45 @@ class MainWindow(QMainWindow):
             t=THEMES[self._theme_name],
             current_theme=self._theme_name,
             current_font_size=s.get("font_size", 15),
+            disabled_shortcuts=s.get("disabled_shortcuts", []),
         )
         dlg.set_preview_callback(self._preview_settings)
+        dlg.set_shortcuts_callback(self._preview_shortcuts)
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            theme, font_size = dlg.values()
+            theme, font_size, disabled_sc = dlg.values()
             self._apply_theme(theme)
             self.editor_panel.set_font_size(font_size)
             self._font_size = font_size
+            self._disabled_shortcuts = disabled_sc
+            self.editor_panel.apply_shortcuts(disabled_sc)
+            self._register_menu_shortcuts(disabled_sc)
             s = load_settings()
             s["font_size"] = font_size
+            s["disabled_shortcuts"] = disabled_sc
             save_settings(s)
 
     def _preview_settings(self, theme: str, font_size: int):
         self._apply_theme(theme, save=False)
         self.editor_panel.set_font_size(font_size)
 
+    def _preview_shortcuts(self, disabled: list[str]):
+        self.editor_panel.apply_shortcuts(disabled)
+        self._register_menu_shortcuts(disabled)
+
     def _load_notebooks(self):
         nbs = storage.list_notebooks()
         if not nbs:
             storage.create_notebook("Personal")
             nbs = ["Personal"]
+        sort = self._notebook_sort
+        if sort == "name_desc":
+            nbs = sorted(nbs, reverse=True)
+        elif sort == "manual":
+            s = load_settings()
+            order = s.get("notebook_order", [])
+            ordered = [nb for nb in order if nb in nbs]
+            remaining = [nb for nb in nbs if nb not in order]
+            nbs = ordered + remaining
         self.sidebar.load_notebooks(nbs)
         self.sidebar.select_first()
 
@@ -1980,6 +2450,44 @@ class MainWindow(QMainWindow):
         )
         if path:
             self.editor_panel.export_pdf(path)
+
+    def _on_pin_requested(self, notebook: str, section: str, slug: str):
+        storage.toggle_pin(notebook, slug, section or None)
+        self.note_list.refresh()
+        if (self.editor_panel._notebook == notebook and
+                self.editor_panel._slug == slug and
+                (self.editor_panel._section or "") == section):
+            note = storage.load_note(notebook, slug, section or None)
+            if note:
+                pinned = note.get("pinned", False)
+                self.editor_panel._pinned = pinned
+                self.editor_panel._pin_btn.setText("\u2605" if pinned else "\u2606")
+                self.editor_panel._pin_btn.setToolTip(
+                    "Unpin note" if pinned else "Pin note"
+                )
+
+    def _on_priority_changed(self, notebook: str, section: str, slug: str, priority: int):
+        storage.set_priority(notebook, slug, priority, section or None)
+        self.note_list.refresh()
+
+    def _on_note_pin_toggled(self, pinned: bool):
+        self.note_list.refresh()
+
+    def _on_pinned_all_requested(self):
+        self.note_list.filter_pinned_all()
+        self.editor_panel.clear()
+
+    def _on_pinned_all_cleared(self):
+        if self._current_notebook:
+            self.note_list.load_notes(self._current_notebook, self._current_section)
+        self.editor_panel.clear()
+
+    def _on_notebook_sort_changed(self, sort: str):
+        self._notebook_sort = sort
+        s = load_settings()
+        s["notebook_sort"] = sort
+        save_settings(s)
+        self._load_notebooks()
 
     def _on_pdf_exported(self, path: str, success: bool):
         if success:

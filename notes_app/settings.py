@@ -3,7 +3,11 @@ from pathlib import Path
 
 _CONFIG_DIR  = Path.home() / ".config" / "notesup"
 _CONFIG_FILE = _CONFIG_DIR / "settings.json"
-_DEFAULTS    = {"theme": "dark", "font_size": 15}
+_DEFAULTS    = {
+    "theme": "dark", "font_size": 15, "disabled_shortcuts": [],
+    "note_sort": "updated_desc", "notebook_sort": "name_asc",
+    "filter_pinned": False, "notebook_order": [],
+}
 
 
 def load_settings() -> dict:

@@ -149,6 +149,8 @@ def list_notes(notebook: str, section: str | None = None) -> list[dict]:
             "tags":       meta.get("tags", []),
             "created_at": meta.get("created_at", ""),
             "updated_at": meta.get("updated_at", ""),
+            "pinned":     meta.get("pinned", False),
+            "priority":   meta.get("priority", 0),
         })
     return sorted(notes, key=lambda n: n["updated_at"], reverse=True)
 
@@ -239,6 +241,27 @@ def delete_note(notebook: str, slug: str,
     md_file.unlink()
     if mp.exists():
         mp.unlink()
+    return True
+
+
+# ─── Pin & Priority ───────────────────────────────────────────────────────────
+
+def toggle_pin(notebook: str, slug: str, section: str | None = None) -> bool:
+    if not _md_path(notebook, slug, section).exists():
+        return False
+    meta = _load_meta(notebook, slug, section)
+    meta["pinned"] = not meta.get("pinned", False)
+    _save_meta(notebook, slug, meta, section)
+    return meta["pinned"]
+
+
+def set_priority(notebook: str, slug: str, priority: int,
+                 section: str | None = None) -> bool:
+    if not _md_path(notebook, slug, section).exists():
+        return False
+    meta = _load_meta(notebook, slug, section)
+    meta["priority"] = max(0, min(3, priority))
+    _save_meta(notebook, slug, meta, section)
     return True
 
 
