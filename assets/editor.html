@@ -124,8 +124,8 @@
   }
 
   /* Language label bar at the top */
-  .ProseMirror pre::before,
-  .toastui-editor-contents pre::before {
+  .ProseMirror pre[data-language]::before,
+  .toastui-editor-contents pre[data-language]::before {
     content: attr(data-language);
     display: block;
     background: var(--bg3) !important;
@@ -136,6 +136,13 @@
     border-bottom: 1px solid var(--border) !important;
     letter-spacing: 0.05em;
     text-transform: lowercase;
+  }
+  /* Hide bar when no language set */
+  .ProseMirror pre:not([data-language])::before,
+  .ProseMirror pre[data-language='']::before,
+  .toastui-editor-contents pre:not([data-language])::before,
+  .toastui-editor-contents pre[data-language='']::before {
+    display: none !important;
   }
 
   /* Code inside block */
@@ -557,9 +564,21 @@
       '.ProseMirror pre code, .toastui-editor-contents pre code, ' +
       '.toastui-editor-ww-code-block pre code'
     ).forEach(function(block) {
-      if (!block.dataset.highlighted) {
-        hljs.highlightElement(block);
+      if (block.dataset.highlighted) return;
+      var pre  = block.closest('pre');
+      var lang = (pre && pre.getAttribute('data-language')) || '';
+      if (!lang) {
+        var m = block.className.match(/language-(\S+)/);
+        if (m) lang = m[1];
       }
+      var code = block.textContent;
+      try {
+        var result = (lang && hljs.getLanguage(lang))
+          ? hljs.highlight(code, { language: lang, ignoreIllegals: true })
+          : hljs.highlightAuto(code);
+        block.innerHTML = result.value;
+      } catch(e) {}
+      block.dataset.highlighted = 'yes';
     });
   }
 
@@ -797,54 +816,99 @@
     { group: 'Insert',    icon: '⊞',   label: 'Table',         desc: '3 × 3 table',            cmd: function() { insertTable(3, 3); } },
   ];
 
-  var _slashActive   = false;
-  var _slashStart    = null;
-  var _slashFiltered = SLASH_COMMANDS.slice();
-  var _slashIdx      = 0;
+  var _slashActive    = false;
+  var _slashInsertPos = null;  // PM position right after '/' when palette opened
+  var _slashFiltered  = SLASH_COMMANDS.slice();
+  var _slashIdx       = 0;
 
   var _palette  = document.getElementById('slash-palette');
   var _searchEl = document.getElementById('slash-search');
   var _listEl   = document.getElementById('slash-list');
 
   function _openPalette() {
-    _slashActive = true;
-    _slashIdx = 0;
+    _slashActive    = true;
+    _slashInsertPos = null;
+    _slashIdx       = 0;
     _searchEl.value = '';
     _renderPalette('');
     _palette.classList.add('open');
 
-    // Position near caret
-    var rect = _getCaretRect();
-    if (rect) {
-      var top  = rect.bottom + 6;
-      var left = rect.left;
-      if (left + 285 > window.innerWidth)  left = window.innerWidth - 290;
-      if (top  + 350 > window.innerHeight) top  = rect.top - 350;
-      _palette.style.top  = top  + 'px';
-      _palette.style.left = left + 'px';
+    // Position: try ProseMirror coordsAtPos first, then Selection API, then fallback
+    var placed = false;
+    try {
+      var wwe2 = editor._editor && (editor._editor.wwEditor || editor._editor.wwe);
+      var pm2  = wwe2 && wwe2.getEditor && wwe2.getEditor();
+      if (pm2 && pm2.coordsAtPos) {
+        var coords = pm2.coordsAtPos(pm2.state.selection.from);
+        var top  = coords.bottom + 6;
+        var left = coords.left;
+        if (left + 285 > window.innerWidth)  left = window.innerWidth - 290;
+        if (top  + 350 > window.innerHeight) top  = coords.top - 356;
+        _palette.style.top  = Math.max(4, top)  + 'px';
+        _palette.style.left = Math.max(4, left) + 'px';
+        placed = true;
+      }
+    } catch(e2) {}
+
+    if (!placed) {
+      try {
+        var sel = window.getSelection();
+        if (sel && sel.rangeCount) {
+          var rng   = sel.getRangeAt(0).cloneRange();
+          rng.collapse(true);
+          var rects = rng.getClientRects();
+          if (rects && rects.length) {
+            var r    = rects[0];
+            var top2 = r.bottom + 6;
+            var lft2 = r.left;
+            if (lft2 + 285 > window.innerWidth)  lft2 = window.innerWidth - 290;
+            if (top2 + 350 > window.innerHeight) top2 = r.top - 356;
+            _palette.style.top  = Math.max(4, top2) + 'px';
+            _palette.style.left = Math.max(4, lft2) + 'px';
+            placed = true;
+          }
+        }
+      } catch(e3) {}
     }
+
+    if (!placed) {
+      // Absolute fallback: center-bottom of viewport
+      _palette.style.top  = Math.round(window.innerHeight * 0.35) + 'px';
+      _palette.style.left = Math.round((window.innerWidth - 280) / 2) + 'px';
+    }
+
     setTimeout(function() { _searchEl.focus(); }, 30);
   }
 
   function _closePalette(deleteSlash) {
-    _slashActive = false;
+    _slashActive    = false;
+    _slashInsertPos = null;
     _palette.classList.remove('open');
-    if (deleteSlash) {
-      // Remove the "/" character that triggered the palette
-      try {
-        var wwe = editor._editor && (editor._editor.wwEditor || editor._editor.wwe);
-        var pm  = wwe && wwe.getEditor && wwe.getEditor();
-        if (pm) {
-          var from = pm.state.selection.from;
-          var tr = pm.state.tr.delete(from - 1, from);
-          pm.dispatch(tr);
-        }
-      } catch(e) {}
-    }
-    // Return focus to editor
     setTimeout(function() {
+      // Restore editor focus first so cursor is back at the '/' position
       try { editor.focus(); } catch(e) {}
-    }, 30);
+      if (deleteSlash) {
+        setTimeout(function() {
+          // execCommand('delete') = Backspace — deletes char before cursor
+          // More reliable than PM internals when focus has moved
+          var deleted = false;
+          try {
+            var wwe = editor._editor && (editor._editor.wwEditor || editor._editor.wwe);
+            var pm  = wwe && wwe.getEditor && wwe.getEditor();
+            if (pm) {
+              var from = pm.state.selection.from;
+              if (from > 0) {
+                pm.dispatch(pm.state.tr.delete(from - 1, from));
+                deleted = true;
+              }
+            }
+          } catch(e) {}
+          if (!deleted) {
+            try { document.execCommand('delete'); } catch(e2) {}
+          }
+        }, 15);
+      }
+    }, 20);
   }
 
   function _renderPalette(query) {
@@ -931,28 +995,72 @@
     }
   });
 
-  // Intercept "/" keypress inside the editor
-  document.addEventListener('keydown', function(e) {
-    if (!_slashActive && !editor) return;
-    if (_slashActive) return; // handled by _searchEl
-    if (e.key !== '/') return;
-    // Only open if "/" is typed at start of line or after whitespace
+  // Intercept "/" — use keyup so the char is already in the editor when we act.
+  // keyup bubbles reliably in QtWebEngine without conflicting with TUI's keymap.
+  document.addEventListener('keyup', function(e) {
+    if (!editor || _slashActive) return;
+    if (e.key !== '/' && e.code !== 'Slash') return;
+    // Skip if inside a code block
     try {
       var wwe = editor._editor && (editor._editor.wwEditor || editor._editor.wwe);
       var pm  = wwe && wwe.getEditor && wwe.getEditor();
-      if (!pm) return;
-      var from = pm.state.selection.from;
-      if (from === 0) { setTimeout(_openPalette, 10); return; }
-      var prevChar = pm.state.doc.textBetween(from - 1, from);
-      if (prevChar === '' || /[\s\n]/.test(prevChar)) {
-        setTimeout(_openPalette, 10);
+      if (pm) {
+        var $from = pm.state.doc.resolve(pm.state.selection.from);
+        for (var d = $from.depth; d >= 0; d--) {
+          if ($from.node(d).type.name === 'code_block') return;
+        }
       }
     } catch(ex) {}
+    _openPalette();
   }, true);
+
+  // ── Code block language sync ────────────────────────────────────────────────
+  // TUI Editor doesn't always set data-language on <pre> when user changes language.
+  // We watch for the language <input> being added and sync its value to the pre.
+  function _bindLangInput(inp) {
+    if (inp._lbBound) return;
+    inp._lbBound = true;
+    function _syncLang() {
+      var val   = inp.value.trim();
+      var block = inp.closest && inp.closest('.toastui-editor-ww-code-block');
+      var pre   = block && block.querySelector('pre');
+      if (!pre) return;
+      if (val) pre.setAttribute('data-language', val);
+      else     pre.removeAttribute('data-language');
+    }
+    inp.addEventListener('input',  _syncLang);
+    inp.addEventListener('change', _syncLang);
+    inp.addEventListener('blur',   _syncLang);
+  }
+
+  function _initCodeLangSync() {
+    var root = document.getElementById('editor');
+    if (!root) return;
+    new MutationObserver(function(muts) {
+      muts.forEach(function(m) {
+        m.addedNodes.forEach(function(n) {
+          if (n.nodeType !== 1) return;
+          var sel    = '.toastui-editor-ww-code-block-language input';
+          var inputs = n.querySelectorAll ? Array.from(n.querySelectorAll(sel)) : [];
+          if (n.matches && n.matches(sel)) inputs.push(n);
+          inputs.forEach(_bindLangInput);
+          // Also: when a code block is newly created, clear the default data-language
+          // so our ::before bar stays hidden until user actually sets a language
+          var blocks = n.querySelectorAll ? Array.from(n.querySelectorAll('.toastui-editor-ww-code-block pre')) : [];
+          if (n.matches && n.matches('.toastui-editor-ww-code-block pre')) blocks.push(n);
+          blocks.forEach(function(pre) {
+            var lang = (pre.getAttribute('data-language') || '').trim();
+            if (!lang || lang === 'text') pre.removeAttribute('data-language');
+          });
+        });
+      });
+    }).observe(root, { childList: true, subtree: true });
+  }
 
   new QWebChannel(qt.webChannelTransport, function(channel) {
     bridge = channel.objects.bridge;
     initEditor();
+    _initCodeLangSync();
   });
 </script>
 </body>
