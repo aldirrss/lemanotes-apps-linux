@@ -186,7 +186,7 @@ There are two ways to provide the Supabase URL and Anon Key to the app.
 
 #### Option A — Configure via UI (default)
 
-In LemaNotes: **Account → Setup Supabase…**, enter the URL and Anon Key, then click **Save & Connect**. Values are saved to `~/.config/notesup/settings.json`.
+In LemaNotes: **Account → Setup Supabase…**, enter the URL and Anon Key, then click **Save & Connect**. Values are saved to `~/.config/lemanotes/settings.json`.
 
 #### Option B — Configure via `.env` file
 
@@ -210,7 +210,7 @@ When `LEMANOTES_SYNC_FROM_ENV=true`:
 
 When `LEMANOTES_SYNC_FROM_ENV=false` (or `.env` is absent):
 - URL and key are configured through the app UI (Option A)
-- Values are stored in `~/.config/notesup/settings.json`
+- Values are stored in `~/.config/lemanotes/settings.json`
 
 | `SYNC_FROM_ENV` | Config source | Setup menu |
 |---|---|---|
@@ -345,7 +345,7 @@ Individual shortcuts can be disabled under **Settings → Shortcuts**.
       <note-slug>.md
       <note-slug>.meta.json
 
-~/.config/notesup/
+~/.config/lemanotes/
   settings.json        # theme, font size, shortcuts, Supabase config (UI mode)
 ```
 

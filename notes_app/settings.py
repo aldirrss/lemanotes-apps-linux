@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-_CONFIG_DIR  = Path.home() / ".config" / "notesup"
+_CONFIG_DIR  = Path.home() / ".config" / "lemanotes"
 _CONFIG_FILE = _CONFIG_DIR / "settings.json"
 _DEFAULTS    = {
     "theme": "dark", "font_size": 15, "disabled_shortcuts": [],
