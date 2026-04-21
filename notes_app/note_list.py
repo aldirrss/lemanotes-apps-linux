@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize
 
 from notes_app.themes import THEMES
 from notes_app.widgets import NoteListWidget, TagPill
+from notes_app.dialogs import PromptDialog
 from notes_app import storage
 from notes_app.settings import load_settings, save_settings
 
@@ -427,8 +428,9 @@ class NoteListPanel(QWidget):
         elif act == rename_act:
             note = storage.load_note(nb, slug, section or None)
             current_title = note.get("title", "") if note else ""
-            new_title, ok = QInputDialog.getText(
-                self, "Rename Note", "New title:", text=current_title
+            new_title, ok = PromptDialog.get_text(
+                self, "Rename Note", "New title",
+                icon="✏️", text=current_title, theme=self._theme,
             )
             if ok and new_title.strip() and new_title.strip() != current_title:
                 self.rename_note_requested.emit(nb, section, slug, new_title.strip())

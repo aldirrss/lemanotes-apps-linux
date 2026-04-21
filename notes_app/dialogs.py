@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QDialogButtonBox, QLineEdit, QSpinBox, QComboBox,
     QPushButton, QLabel, QTabWidget, QTreeWidget, QTreeWidgetItem,
-    QHeaderView, QMessageBox,
+    QHeaderView, QMessageBox, QGraphicsDropShadowEffect,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QByteArray, QSize
 from PyQt6.QtGui import QColor, QPixmap, QIcon
@@ -70,6 +70,224 @@ def _dialog_style(t: dict) -> str:
             selection-background-color: {t['item_sel']};
         }}
     """
+
+
+class PromptDialog(QDialog):
+    """
+    Styled frameless input dialog.
+    Usage:
+        text, ok = PromptDialog.get_text(parent, "New Note", "Note title",
+                                          icon="📝", text="", theme=t)
+    """
+
+    def __init__(self, parent, title: str, label: str,
+                 icon: str = "✏️", text: str = "", theme: dict = None):
+        super().__init__(parent)
+        t = theme or {}
+
+        self.setWindowFlags(
+            Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedWidth(420)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(16, 16, 16, 20)
+
+        card = QWidget()
+        card.setObjectName("card")
+        card.setStyleSheet(f"""
+            #card {{
+                background: {t.get('bg3', '#18183A')};
+                border: 1px solid {t.get('border2', '#3A3A7A')};
+                border-radius: 14px;
+            }}
+        """)
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(40)
+        shadow.setOffset(0, 6)
+        shadow.setColor(QColor(0, 0, 0, 100))
+        card.setGraphicsEffect(shadow)
+        outer.addWidget(card)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setSpacing(0)
+
+        # ── Header ────────────────────────────────────────────────────
+        header = QHBoxLayout()
+        header.setSpacing(12)
+
+        icon_lbl = QLabel(icon)
+        icon_lbl.setFixedSize(42, 42)
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setStyleSheet(f"""
+            QLabel {{
+                background: {t.get('item_sel', '#2A2A5A')};
+                border-radius: 12px;
+                font-size: 20px;
+            }}
+        """)
+
+        title_lbl = QLabel(title)
+        title_lbl.setStyleSheet(f"""
+            QLabel {{
+                color: {t.get('text2', '#F0EEFF')};
+                font-size: 16px;
+                font-weight: 700;
+                letter-spacing: 0.2px;
+                background: transparent;
+            }}
+        """)
+
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(28, 28)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {t.get('muted2', '#4A487A')};
+                border: none;
+                border-radius: 14px;
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                background: {t.get('item_hover', '#32326A')};
+                color: {t.get('text', '#E2E0FF')};
+            }}
+        """)
+        close_btn.clicked.connect(self.reject)
+
+        header.addWidget(icon_lbl)
+        header.addWidget(title_lbl)
+        header.addStretch()
+        header.addWidget(close_btn)
+        layout.addLayout(header)
+        layout.addSpacing(20)
+
+        # ── Label ─────────────────────────────────────────────────────
+        label_lbl = QLabel(label.upper())
+        label_lbl.setStyleSheet(f"""
+            QLabel {{
+                color: {t.get('muted', '#7A78AA')};
+                font-size: 10px;
+                font-weight: 600;
+                letter-spacing: 1.2px;
+                background: transparent;
+            }}
+        """)
+        layout.addWidget(label_lbl)
+        layout.addSpacing(8)
+
+        # ── Input ─────────────────────────────────────────────────────
+        self._input = QLineEdit(text)
+        self._input.setFixedHeight(42)
+        self._input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {t.get('bg', '#0D0D1A')};
+                color: {t.get('text', '#E2E0FF')};
+                border: 1.5px solid {t.get('border', '#2A2A5A')};
+                border-radius: 9px;
+                padding: 0 14px;
+                font-size: 14px;
+            }}
+            QLineEdit:focus {{
+                border-color: {t.get('accent', '#A78BFA')};
+                background: {t.get('bg2', '#12122A')};
+            }}
+        """)
+        self._input.selectAll()
+        self._input.returnPressed.connect(self._accept_if_valid)
+        self._input.textChanged.connect(self._on_text_changed)
+        layout.addWidget(self._input)
+        layout.addSpacing(20)
+
+        # ── Buttons ───────────────────────────────────────────────────
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedHeight(38)
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {t.get('muted', '#7A78AA')};
+                border: 1.5px solid {t.get('border', '#2A2A5A')};
+                border-radius: 8px;
+                padding: 0 20px;
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background: {t.get('item_hover', '#32326A')};
+                color: {t.get('text', '#E2E0FF')};
+                border-color: {t.get('border2', '#3A3A7A')};
+            }}
+        """)
+        cancel_btn.clicked.connect(self.reject)
+
+        self._ok_btn = QPushButton("OK")
+        self._ok_btn.setFixedHeight(38)
+        self._ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._ok_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {t.get('accent', '#A78BFA')};
+                color: {t.get('accent_fg', '#0D0D1A')};
+                border: none;
+                border-radius: 8px;
+                padding: 0 28px;
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: {t.get('accent_hover', '#C4B5FD')};
+            }}
+            QPushButton:disabled {{
+                background: {t.get('border', '#2A2A5A')};
+                color: {t.get('muted2', '#4A487A')};
+            }}
+        """)
+        self._ok_btn.clicked.connect(self._accept_if_valid)
+        self._on_text_changed(text)
+
+        btn_row.addStretch()
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(self._ok_btn)
+        layout.addLayout(btn_row)
+
+        self._drag_pos = None
+
+    def _on_text_changed(self, text: str):
+        self._ok_btn.setEnabled(bool(text.strip()))
+
+    def _accept_if_valid(self):
+        if self._input.text().strip():
+            self.accept()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._input.setFocus()
+        self._input.selectAll()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, e):
+        if self._drag_pos and e.buttons() == Qt.MouseButton.LeftButton:
+            self.move(e.globalPosition().toPoint() - self._drag_pos)
+
+    def mouseReleaseEvent(self, e):
+        self._drag_pos = None
+
+    @staticmethod
+    def get_text(parent, title: str, label: str,
+                 icon: str = "✏️", text: str = "",
+                 theme: dict = None) -> tuple[str, bool]:
+        dlg = PromptDialog(parent, title, label, icon, text, theme)
+        ok = dlg.exec() == QDialog.DialogCode.Accepted
+        return dlg._input.text().strip(), ok
 
 
 class InsertLinkDialog(QDialog):

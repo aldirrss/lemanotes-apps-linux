@@ -17,7 +17,7 @@ from PyQt6.QtGui import QAction, QFont, QKeySequence, QIcon
 
 from notes_app.themes import THEMES, _THEME_CYCLE  # noqa: F401
 from notes_app.shortcuts import _MANDATORY_SHORTCUTS
-from notes_app.dialogs import SettingsDialog, LoginDialog, SyncSetupDialog
+from notes_app.dialogs import SettingsDialog, LoginDialog, SyncSetupDialog, PromptDialog
 from notes_app.sidebar import SidebarPanel
 from notes_app.note_list import NoteListPanel
 from notes_app.editor import EditorPanel
@@ -314,7 +314,11 @@ class MainWindow(QMainWindow):
                     break
 
     def _create_notebook(self):
-        name, ok = QInputDialog.getText(self, "New Notebook", "Notebook name:")
+        t = THEMES[self._theme_name]
+        name, ok = PromptDialog.get_text(
+            self, "New Notebook", "Notebook name",
+            icon="📁", theme=t,
+        )
         if ok and name.strip():
             storage.create_notebook(name.strip())
             nbs = storage.list_notebooks()
@@ -326,7 +330,11 @@ class MainWindow(QMainWindow):
         if not self._current_notebook:
             QMessageBox.information(self, "Info", "Select a notebook first.")
             return
-        title, ok = QInputDialog.getText(self, "New Note", "Note title:")
+        t = THEMES[self._theme_name]
+        title, ok = PromptDialog.get_text(
+            self, "New Note", "Note title",
+            icon="📝", theme=t,
+        )
         if ok and title.strip():
             note = storage.create_note(
                 self._current_notebook, title.strip(),
