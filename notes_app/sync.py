@@ -1,29 +1,65 @@
 """Supabase sync manager — offline-first, auto-sync when logged in."""
 
 import json
+import os
 import threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 import webbrowser
 
 from notes_app.settings import load_settings, save_settings
 from notes_app import storage
 
+# Resolve .env relative to this package's parent directory (project root)
+_ENV_FILE = Path(__file__).parent.parent / ".env"
+
+
+def _load_env_file():
+    """Load .env file if present. Returns dict of key→value."""
+    if not _ENV_FILE.exists():
+        return {}
+    try:
+        from dotenv import dotenv_values
+        return dotenv_values(_ENV_FILE)
+    except ImportError:
+        # Fallback: manual parse
+        values = {}
+        for line in _ENV_FILE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            values[k.strip()] = v.strip()
+        return values
+
 
 class SyncManager:
     def __init__(self):
         self._client = None
         self._ready = False
+        self._env_locked = False   # True when config comes from .env
         self._load_config()
 
     # ── Config / init ────────────────────────────────────────────────────────────
 
     def _load_config(self):
-        s = load_settings()
-        url = s.get("supabase_url", "")
-        key = s.get("supabase_key", "")
+        env = _load_env_file()
+        from_env = env.get("LEMANOTES_SYNC_FROM_ENV", "false").lower() == "true"
+
+        if from_env:
+            url = env.get("LEMANOTES_SUPABASE_URL", "").strip()
+            key = env.get("LEMANOTES_SUPABASE_ANON_KEY", "").strip()
+            self._env_locked = True
+        else:
+            s = load_settings()
+            url = s.get("supabase_url", "")
+            key = s.get("supabase_key", "")
+            self._env_locked = False
+
         if url and key:
+            s = load_settings()
             self._init_client(url, key, s.get("supabase_session"))
 
     def _init_client(self, url: str, key: str, session_data: dict | None = None):
@@ -43,6 +79,9 @@ class SyncManager:
             self._ready = False
 
     def configure(self, url: str, key: str) -> tuple[bool, str]:
+        """Configure Supabase via UI. Not available when env-locked."""
+        if self._env_locked:
+            return False, "Configuration is locked by .env file."
         try:
             from supabase import create_client
             client = create_client(url, key)
@@ -62,6 +101,10 @@ class SyncManager:
 
     def is_configured(self) -> bool:
         return self._ready and self._client is not None
+
+    def is_env_locked(self) -> bool:
+        """True when Supabase config is loaded from .env (UI setup is read-only)."""
+        return self._env_locked
 
     def is_logged_in(self) -> bool:
         if not self._client:

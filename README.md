@@ -45,6 +45,7 @@ pip install -r requirements.txt
 PyQt6>=6.6.0
 PyQt6-WebEngine>=6.6.0
 supabase>=2.0.0
+python-dotenv>=1.0.0
 ```
 
 ### 3. Run
@@ -62,6 +63,7 @@ python run.py
 | `PyQt6-WebEngine` not found | `sudo apt install -y python3-pyqt6.qtwebengine` |
 | Editor area is blank | Make sure `assets/tui/` contains the Toast UI Editor files |
 | `ModuleNotFoundError: supabase` | `pip install supabase` |
+| `ModuleNotFoundError: dotenv` | `pip install python-dotenv` |
 
 ---
 
@@ -132,8 +134,8 @@ http://localhost:54321/callback
 1. Go to [github.com](https://github.com) → **Settings → Developer settings → OAuth Apps → New OAuth App**.
 2. Fill in the form:
    ```
-   Application name        : LemaNotes
-   Homepage URL            : https://<your-project-ref>.supabase.co
+   Application name           : LemaNotes
+   Homepage URL               : https://<your-project-ref>.supabase.co
    Authorization callback URL : https://<your-project-ref>.supabase.co/auth/v1/callback
    ```
 3. Click **Register application**, then click **Generate a new client secret**.
@@ -148,7 +150,42 @@ Go to **Project Settings → API** and copy:
 
 ### 5. Connect to the App
 
-In LemaNotes: **Account → Setup Supabase…**, enter the URL and Anon Key, then click **Save & Connect**.
+There are two ways to provide the Supabase URL and Anon Key to the app.
+
+#### Option A — Configure via UI (default)
+
+In LemaNotes: **Account → Setup Supabase…**, enter the URL and Anon Key, then click **Save & Connect**. Values are saved to `~/.config/notesup/settings.json`.
+
+#### Option B — Configure via `.env` file
+
+Copy `.env.example` to `.env` in the app directory and fill in your values:
+
+```bash
+cp .env.example .env
+```
+
+```env
+LEMANOTES_SYNC_FROM_ENV=true
+LEMANOTES_SUPABASE_URL=https://xxxx.supabase.co
+LEMANOTES_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIs...
+```
+
+When `LEMANOTES_SYNC_FROM_ENV=true`:
+- The app loads URL and key from `.env` on startup
+- The **Account → Setup Supabase…** menu item is hidden (config is read-only)
+- Users only need to log in — no manual configuration required
+- Useful for distributing the app with a pre-configured backend
+
+When `LEMANOTES_SYNC_FROM_ENV=false` (or `.env` is absent):
+- URL and key are configured through the app UI (Option A)
+- Values are stored in `~/.config/notesup/settings.json`
+
+| `SYNC_FROM_ENV` | Config source | Setup menu |
+|---|---|---|
+| `true` | `.env` file | Hidden |
+| `false` or absent | App UI → `settings.json` | Visible |
+
+> Never commit your `.env` file to version control. Add it to `.gitignore`.
 
 ---
 
@@ -277,7 +314,7 @@ Individual shortcuts can be disabled under **Settings → Shortcuts**.
       <note-slug>.meta.json
 
 ~/.config/notesup/
-  settings.json        # theme, font size, shortcuts, Supabase config
+  settings.json        # theme, font size, shortcuts, Supabase config (UI mode)
 ```
 
 ## Project Structure
@@ -286,6 +323,7 @@ Individual shortcuts can be disabled under **Settings → Shortcuts**.
 lemanotes-apps/
 ├── run.py
 ├── requirements.txt
+├── .env.example             # Supabase config template
 ├── assets/
 │   ├── editor.html          # Toast UI Editor wrapper
 │   └── tui/                 # Toast UI Editor static files

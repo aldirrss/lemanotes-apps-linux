@@ -175,6 +175,8 @@ class MainWindow(QMainWindow):
 
         self._update_menu_style()
         self._refresh_sync_ui()
+        if sync_manager.is_env_locked():
+            self._setup_act.setVisible(False)
 
     def _update_menu_style(self):
         t = THEMES[self._theme_name]
@@ -449,14 +451,17 @@ class MainWindow(QMainWindow):
     # ── Sync / Account ────────────────────────────────────────────────────────────
 
     def _refresh_sync_ui(self):
+        locked = sync_manager.is_env_locked()
         if sync_manager.is_logged_in():
             email = sync_manager.get_user_email() or "Logged in"
-            self._sync_btn.setText(f"☁  {email}")
+            suffix = " (pre-configured)" if locked else ""
+            self._sync_btn.setText(f"☁  {email}{suffix}")
             self._login_act.setVisible(False)
             self._logout_act.setVisible(True)
             self._sync_now_act.setEnabled(True)
         else:
-            self._sync_btn.setText("☁  Sign in")
+            label = "☁  Sign in (pre-configured)" if locked else "☁  Sign in"
+            self._sync_btn.setText(label)
             self._login_act.setVisible(True)
             self._logout_act.setVisible(False)
             self._sync_now_act.setEnabled(False)
