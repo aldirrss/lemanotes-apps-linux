@@ -40,12 +40,19 @@ After install, launch the app with:
 
 ```bash
 lemanotes
-# or
-python run.py
+# or open it from the app launcher / desktop icon
 ```
 
-> **Requirements:** Ubuntu / Debian with `sudo` access, Python 3.10+.  
-> The installer automatically tries `zenity` / `kdialog` / `whiptail` for GUI dialogs, and falls back to plain terminal prompts if none are available.
+> **Requirements:** Ubuntu / Debian with `sudo` access, Python 3.10+.
+
+The installer detects Python automatically in this order:
+
+1. **Active conda environment** (if running inside one)
+2. **Any conda environment** that already has PyQt6
+3. **System Python** (`python3`) that already has PyQt6
+4. **Auto venv** — if none of the above work, a self-contained virtual environment is created at `~/.local/lib/lemanotes/venv/` and all dependencies are installed there automatically
+
+No conda or pre-installed packages required — it just works.
 
 ---
 
