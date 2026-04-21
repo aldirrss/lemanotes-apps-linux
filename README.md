@@ -19,6 +19,38 @@ A Linux desktop notes app built with PyQt6, with optional cloud sync via Supabas
 
 ## Installation
 
+### Quick Install (Recommended)
+
+Run the interactive installer — it handles system packages, Python dependencies, `.env` configuration, and desktop shortcut creation in one step:
+
+```bash
+cd lemanotes-apps
+chmod +x install.sh
+./install.sh
+```
+
+The installer will ask you to choose a **Sync mode**:
+
+| Mode | Description |
+|---|---|
+| **Static** | You enter a Supabase URL and Anon Key during install. The `.env` file is written with `LEMANOTES_SYNC_FROM_ENV=true`. Users only need to log in — no in-app setup required. |
+| **Dynamic** | Supabase credentials are configured later inside the app via **Account → Setup Supabase…** (default). |
+
+After install, launch the app with:
+
+```bash
+lemanotes
+# or
+python run.py
+```
+
+> **Requirements:** Ubuntu / Debian with `sudo` access, Python 3.10+.  
+> The installer automatically tries `zenity` / `kdialog` / `whiptail` for GUI dialogs, and falls back to plain terminal prompts if none are available.
+
+---
+
+### Manual Installation
+
 ### 1. System Dependencies (Ubuntu / Debian)
 
 ```bash

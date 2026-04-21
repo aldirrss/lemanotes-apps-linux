@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QDialog, QInputDialog, QMessageBox, QFileDialog, QPushButton,
 )
 from PyQt6.QtCore import Qt, QObject, pyqtSignal
-from PyQt6.QtGui import QAction, QFont, QKeySequence
+from PyQt6.QtGui import QAction, QFont, QKeySequence, QIcon
 
 from notes_app.themes import THEMES, _THEME_CYCLE  # noqa: F401
 from notes_app.shortcuts import _MANDATORY_SHORTCUTS
@@ -601,6 +601,11 @@ def main():
     app.setApplicationName("LemaNotes")
     app.setOrganizationName("Lemacore")
     app.setFont(QFont("Segoe UI", 10))
+
+    _icon_path = Path(__file__).parent.parent / "assets" / "images" / "icon.png"
+    if _icon_path.exists():
+        app.setWindowIcon(QIcon(str(_icon_path)))
+
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
