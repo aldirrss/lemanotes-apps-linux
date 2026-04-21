@@ -156,9 +156,9 @@ mkdir -p "$INSTALL_DIR"
 
 rsync -a --delete \
     "$SCRIPT_DIR/run.py" \
-    "$SCRIPT_DIR/notes_app/" \
-    "$SCRIPT_DIR/assets/" \
-    "$INSTALL_DIR/" \
+    "$SCRIPT_DIR/notes_app" \
+    "$SCRIPT_DIR/assets" \
+    "$INSTALL_DIR" \
     --exclude="__pycache__" \
     --exclude="*.pyc"
 

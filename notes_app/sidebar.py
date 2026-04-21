@@ -306,8 +306,10 @@ class SidebarPanel(QWidget):
         t = self._theme
         menu = QMenu(self)
         menu.setStyleSheet(f"""
-            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; }}
-            QMenu::item:selected {{ background: {t['item_sel']}; }}
+            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: 8px; padding: 4px; }}
+            QMenu::item {{ padding: 6px 16px 6px 12px; border-radius: 5px; color: {t['text']}; margin: 1px 0; }}
+            QMenu::item:selected {{ background: {t['item_sel']}; color: {t['text']}; }}
+            QMenu::separator {{ height: 1px; background: {t['border']}; margin: 4px 8px; }}
         """)
         a_z    = menu.addAction("Sort A \u2192 Z")
         z_a    = menu.addAction("Sort Z \u2192 A")
@@ -335,8 +337,10 @@ class SidebarPanel(QWidget):
         t = self._theme
         menu = QMenu(self)
         menu.setStyleSheet(f"""
-            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; }}
-            QMenu::item:selected {{ background: {t['item_sel']}; }}
+            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: 8px; padding: 4px; }}
+            QMenu::item {{ padding: 6px 16px 6px 12px; border-radius: 5px; color: {t['text']}; margin: 1px 0; }}
+            QMenu::item:selected {{ background: {t['item_sel']}; color: {t['text']}; }}
+            QMenu::separator {{ height: 1px; background: {t['border']}; margin: 4px 8px; }}
         """)
 
         if not sec:

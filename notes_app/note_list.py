@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QPushButton, QLabel, QListWidgetItem, QMenu, QMessageBox, QStackedWidget,
+    QInputDialog,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 
@@ -27,6 +28,7 @@ class NoteListPanel(QWidget):
     delete_note_requested = pyqtSignal(str, str, str)
     pin_note_requested = pyqtSignal(str, str, str)           # (nb, section, slug)
     priority_changed = pyqtSignal(str, str, str, int)        # (nb, section, slug, priority)
+    rename_note_requested = pyqtSignal(str, str, str, str)   # (nb, section, slug, new_title)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -374,8 +376,10 @@ class NoteListPanel(QWidget):
         t = self._theme
         menu = QMenu(self)
         menu.setStyleSheet(f"""
-            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; }}
-            QMenu::item:selected {{ background: {t['item_sel']}; }}
+            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: 8px; padding: 4px; }}
+            QMenu::item {{ padding: 6px 16px 6px 12px; border-radius: 5px; color: {t['text']}; margin: 1px 0; }}
+            QMenu::item:selected {{ background: {t['item_sel']}; color: {t['text']}; }}
+            QMenu::separator {{ height: 1px; background: {t['border']}; margin: 4px 8px; }}
         """)
         acts = {}
         for key, label in _SORT_LABELS.items():
@@ -399,13 +403,16 @@ class NoteListPanel(QWidget):
         priority   = extra.get("priority", 0)
         t = self._theme
         menu_ss = f"""
-            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; }}
-            QMenu::item:selected {{ background: {t['item_sel']}; }}
+            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: 8px; padding: 4px; }}
+            QMenu::item {{ padding: 6px 16px 6px 12px; border-radius: 5px; color: {t['text']}; margin: 1px 0; }}
+            QMenu::item:selected {{ background: {t['item_sel']}; color: {t['text']}; }}
+            QMenu::separator {{ height: 1px; background: {t['border']}; margin: 4px 8px; }}
         """
         menu = QMenu(self)
         menu.setStyleSheet(menu_ss)
-        pin_act   = menu.addAction("\U0001f4cc  Unpin" if is_pinned else "\U0001f4cc  Pin")
-        prio_menu = menu.addMenu("  Priority")
+        pin_act    = menu.addAction("\U0001f4cc  Unpin" if is_pinned else "\U0001f4cc  Pin")
+        rename_act = menu.addAction("\u270f\ufe0f  Rename")
+        prio_menu  = menu.addMenu("  Priority")
         prio_menu.setStyleSheet(menu_ss)
         prio_acts = {}
         for lvl, lbl in [(0, "None"), (1, "Low \u25cf"), (2, "Medium \u25cf"), (3, "High \u25cf")]:
@@ -417,6 +424,14 @@ class NoteListPanel(QWidget):
         act = menu.exec(self.list_widget.mapToGlobal(pos))
         if act == pin_act:
             self.pin_note_requested.emit(nb, section, slug)
+        elif act == rename_act:
+            note = storage.load_note(nb, slug, section or None)
+            current_title = note.get("title", "") if note else ""
+            new_title, ok = QInputDialog.getText(
+                self, "Rename Note", "New title:", text=current_title
+            )
+            if ok and new_title.strip() and new_title.strip() != current_title:
+                self.rename_note_requested.emit(nb, section, slug, new_title.strip())
         elif act in prio_acts:
             self.priority_changed.emit(nb, section, slug, prio_acts[act])
         elif act == del_act:

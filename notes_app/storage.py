@@ -194,6 +194,17 @@ def load_note(notebook: str, slug: str,
     }
 
 
+def rename_note(notebook: str, slug: str, new_title: str,
+                section: str | None = None) -> bool:
+    if not _md_path(notebook, slug, section).exists():
+        return False
+    meta = _load_meta(notebook, slug, section)
+    meta["title"] = new_title
+    meta["updated_at"] = datetime.now().isoformat()
+    _save_meta(notebook, slug, meta, section)
+    return True
+
+
 def save_note(notebook: str, slug: str, content: str,
               title: str = None, tags: list[str] = None,
               section: str | None = None) -> bool:

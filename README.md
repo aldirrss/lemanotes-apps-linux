@@ -54,6 +54,30 @@ The installer detects Python automatically in this order:
 
 No conda or pre-installed packages required — it just works.
 
+### Uninstall
+
+```bash
+chmod +x uninstall.sh
+./uninstall.sh
+```
+
+Removes app files (`~/.local/lib/lemanotes/`), desktop shortcut, and the `lemanotes` CLI launcher.  
+Your notes (`~/LemaNotes/`) and settings (`~/.config/lemanotes/`) are **not** deleted.
+
+To also remove notes and settings:
+```bash
+rm -rf ~/LemaNotes ~/.config/lemanotes
+```
+
+### Reinstall
+
+Run uninstall first, then install again:
+
+```bash
+./uninstall.sh
+./install.sh
+```
+
 ---
 
 ### Manual Installation

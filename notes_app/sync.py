@@ -110,8 +110,9 @@ class SyncManager:
         if not self._client:
             return False
         try:
-            user = self._client.auth.get_user()
-            return user is not None and user.user is not None
+            # Use local session cache — avoids HTTP round-trip that can fail right after login
+            session = self._client.auth.get_session()
+            return session is not None and session.user is not None
         except Exception:
             return False
 
@@ -119,8 +120,8 @@ class SyncManager:
         if not self._client:
             return None
         try:
-            user = self._client.auth.get_user()
-            return user.user.email if user and user.user else None
+            session = self._client.auth.get_session()
+            return session.user.email if session and session.user else None
         except Exception:
             return None
 
@@ -283,12 +284,17 @@ class SyncManager:
         except Exception as e:
             print(f"[Sync] delete_note error: {e}")
 
-    def pull_all(self) -> int:
-        """Pull cloud notes newer than local. Returns count of notes written."""
+    def pull_all(self) -> tuple[int, str]:
+        """Pull cloud notes newer than local.
+
+        Returns (count_written, error_message).
+        error_message is empty string on success.
+        """
         if not self.is_logged_in():
-            return 0
+            return 0, "Not logged in"
         try:
-            uid = self._client.auth.get_user().user.id
+            session = self._client.auth.get_session()
+            uid = session.user.id
             res = (self._client.table("notes")
                    .select("*")
                    .eq("user_id", uid)
@@ -296,8 +302,8 @@ class SyncManager:
                    .execute())
             count = 0
             for row in res.data:
-                nb  = row["notebook"]
-                sec = row["section"] or None
+                nb   = row["notebook"]
+                sec  = row["section"] or None
                 slug = row["slug"]
 
                 if nb not in storage.list_notebooks():
@@ -305,7 +311,7 @@ class SyncManager:
                 if sec and sec not in storage.list_sections(nb):
                     storage.create_section(nb, sec)
 
-                existing = storage.load_note(nb, slug, sec)
+                existing  = storage.load_note(nb, slug, sec)
                 remote_ts = row.get("updated_at", "")
                 local_ts  = existing.get("updated_at", "") if existing else ""
 
@@ -327,21 +333,24 @@ class SyncManager:
                         json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8"
                     )
                     count += 1
-            return count
+            return count, ""
         except Exception as e:
-            print(f"[Sync] pull_all error: {e}")
-            return 0
+            return 0, str(e)
 
-    def push_all(self):
-        """Push all local notes to cloud."""
+    def push_all(self) -> str:
+        """Push all local notes to cloud. Returns error string or empty string."""
         if not self.is_logged_in():
-            return
-        for nb in storage.list_notebooks():
-            for note in storage.list_notes(nb):
-                self.push_note(nb, note["slug"])
-            for sec in storage.list_sections(nb):
-                for note in storage.list_notes(nb, sec):
-                    self.push_note(nb, note["slug"], sec)
+            return "Not logged in"
+        try:
+            for nb in storage.list_notebooks():
+                for note in storage.list_notes(nb):
+                    self.push_note(nb, note["slug"])
+                for sec in storage.list_sections(nb):
+                    for note in storage.list_notes(nb, sec):
+                        self.push_note(nb, note["slug"], sec)
+            return ""
+        except Exception as e:
+            return str(e)
 
 
 sync_manager = SyncManager()

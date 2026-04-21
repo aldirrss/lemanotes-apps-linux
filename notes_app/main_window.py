@@ -94,6 +94,7 @@ class MainWindow(QMainWindow):
         self.note_list.delete_note_requested.connect(self._delete_note)
         self.note_list.pin_note_requested.connect(self._on_pin_requested)
         self.note_list.priority_changed.connect(self._on_priority_changed)
+        self.note_list.rename_note_requested.connect(self._on_rename_note)
         self._splitter.addWidget(self.note_list)
 
         self.editor_panel = EditorPanel()
@@ -183,8 +184,10 @@ class MainWindow(QMainWindow):
         self._menubar.setStyleSheet(f"""
             QMenuBar {{ background: {t['bg2']}; color: {t['muted']}; }}
             QMenuBar::item:selected {{ background: {t['item_sel']}; color: {t['accent']}; }}
-            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; }}
-            QMenu::item:selected {{ background: {t['item_sel']}; }}
+            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: 8px; padding: 4px; }}
+            QMenu::item {{ padding: 6px 16px 6px 12px; border-radius: 5px; color: {t['text']}; margin: 1px 0; }}
+            QMenu::item:selected {{ background: {t['item_sel']}; color: {t['text']}; }}
+            QMenu::separator {{ height: 1px; background: {t['border']}; margin: 4px 8px; }}
         """)
         self.status_bar.setStyleSheet(
             f"background: {t['bg2']}; color: {t['muted2']}; font-size: 11px;"
@@ -396,6 +399,23 @@ class MainWindow(QMainWindow):
                     "Unpin note" if pinned else "Pin note"
                 )
 
+    def _on_rename_note(self, notebook: str, section: str, slug: str, new_title: str):
+        ok = storage.rename_note(notebook, slug, new_title, section or None)
+        if not ok:
+            return
+        self.note_list.refresh()
+        # If this note is currently open in the editor, update the title input
+        if (self.editor_panel._notebook == notebook
+                and self.editor_panel._slug == slug
+                and self.editor_panel._section == (section or None)):
+            self.editor_panel.title_input.blockSignals(True)
+            self.editor_panel.title_input.setText(new_title)
+            self.editor_panel.title_input.blockSignals(False)
+        self.status_bar.showMessage(f'Renamed to “{new_title}”', 2000)
+        # Push to cloud if logged in
+        if sync_manager.is_logged_in():
+            self._push_note_async(notebook, slug, section or None)
+
     def _on_priority_changed(self, notebook: str, section: str, slug: str, priority: int):
         storage.set_priority(notebook, slug, priority, section or None)
         labels = {0: "cleared", 1: "set to Low", 2: "set to Medium", 3: "set to High"}
@@ -534,12 +554,15 @@ class MainWindow(QMainWindow):
 
     def _after_login(self):
         self._refresh_sync_ui()
-        self.status_bar.showMessage("Login successful, pulling data…", 2000)
+        self.status_bar.showMessage("Login successful — pulling data…", 0)
         sig = self._sync_sig
         sig.status.emit("syncing")
         def run():
-            count = sync_manager.pull_all()
-            sig.status.emit(f"__pulled:{count}")
+            count, err = sync_manager.pull_all()
+            if err and err != "Not logged in":
+                sig.status.emit(f"error:{err}")
+            else:
+                sig.status.emit(f"__pulled:{count}")
         threading.Thread(target=run, daemon=True).start()
 
     def _on_sync_status(self, status: str):
@@ -550,16 +573,19 @@ class MainWindow(QMainWindow):
             self._sync_btn.setText(f"☁  {email}")
             self.status_bar.showMessage("Synced", 2000)
         elif status.startswith("error:"):
-            self._sync_btn.setText("☁  Sync error")
-            self.status_bar.showMessage(f"Sync error: {status[6:]}", 4000)
+            self._refresh_sync_ui()
+            msg = status[6:]
+            self.status_bar.showMessage(f"Sync error: {msg}", 8000)
+            QMessageBox.warning(self, "Sync Error", msg)
         elif status == "__refresh__":
             self._refresh_sync_ui()
         elif status == "__after_login__":
             self._after_login()
         elif status.startswith("__pulled:"):
-            count = status.split(":")[1]
+            count = int(status.split(":")[1])
             self._refresh_sync_ui()
-            self.status_bar.showMessage(f"Sync complete: {count} note(s) updated", 3000)
+            msg = f"Sync complete — {count} note(s) updated" if count else "Sync complete"
+            self.status_bar.showMessage(msg, 3000)
             self._load_notebooks()
             self.sidebar.refresh_tags()
 
@@ -574,9 +600,13 @@ class MainWindow(QMainWindow):
         sig = self._sync_sig
         sig.status.emit("syncing")
         def run():
-            count = sync_manager.pull_all()
-            sync_manager.push_all()
-            sig.status.emit(f"__pulled:{count}")
+            count, pull_err = sync_manager.pull_all()
+            push_err = sync_manager.push_all()
+            err = pull_err or push_err
+            if err and err != "Not logged in":
+                sig.status.emit(f"error:{err}")
+            else:
+                sig.status.emit(f"__pulled:{count}")
         threading.Thread(target=run, daemon=True).start()
 
     def _open_setup(self):
