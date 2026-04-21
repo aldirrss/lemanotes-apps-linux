@@ -322,6 +322,28 @@ def get_all_tags() -> list[str]:
     return sorted(tags)
 
 
+def remove_tag_from_all(tag: str) -> int:
+    """Remove a tag from every note that has it. Returns count of modified notes."""
+    count = 0
+    for nb in list_notebooks():
+        for note in list_notes(nb):
+            if tag in note.get("tags", []):
+                meta = _load_meta(nb, note["slug"])
+                meta["tags"] = [t for t in meta.get("tags", []) if t != tag]
+                meta["updated_at"] = datetime.now().isoformat()
+                _save_meta(nb, note["slug"], meta)
+                count += 1
+        for sec in list_sections(nb):
+            for note in list_notes(nb, sec):
+                if tag in note.get("tags", []):
+                    meta = _load_meta(nb, note["slug"], sec)
+                    meta["tags"] = [t for t in meta.get("tags", []) if t != tag]
+                    meta["updated_at"] = datetime.now().isoformat()
+                    _save_meta(nb, note["slug"], meta, sec)
+                    count += 1
+    return count
+
+
 def filter_by_tag(tag: str) -> list[dict]:
     tag_lower = tag.lower()
     results   = []

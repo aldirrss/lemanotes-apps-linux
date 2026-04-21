@@ -79,6 +79,7 @@ class MainWindow(QMainWindow):
         self.sidebar.note_moved.connect(self._on_note_moved)
         self.sidebar.tag_selected.connect(self._on_tag_selected)
         self.sidebar.tag_cleared.connect(self._on_tag_cleared)
+        self.sidebar.delete_tag_requested.connect(self._on_delete_tag)
         self.sidebar.theme_toggle_requested.connect(self._toggle_theme)
         self.sidebar.pinned_all_requested.connect(self._on_pinned_all_requested)
         self.sidebar.pinned_all_cleared.connect(self._on_pinned_all_cleared)
@@ -368,6 +369,14 @@ class MainWindow(QMainWindow):
     def _on_tag_cleared(self):
         self.note_list.clear_tag_filter()
         self.editor_panel.clear()
+
+    def _on_delete_tag(self, tag: str):
+        count = storage.remove_tag_from_all(tag)
+        self.sidebar.refresh_tags()
+        self.note_list.refresh()
+        self.status_bar.showMessage(
+            f"Tag '{tag}' removed from {count} note{'s' if count != 1 else ''}", 2500
+        )
 
     def _on_note_moved(self, src_nb: str, src_sec: str, slug: str,
                        dst_nb: str, dst_sec: str):

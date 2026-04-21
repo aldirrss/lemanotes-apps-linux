@@ -74,9 +74,22 @@ class SyncManager:
                     )
                 except Exception:
                     pass
+                # Refresh in background so a restarted app gets a fresh access token
+                # without blocking startup. Refresh token is long-lived; access token
+                # expires in ~1 hour which is why logout happens after restart.
+                threading.Thread(target=self._refresh_session_bg, daemon=True).start()
             self._ready = True
         except Exception:
             self._ready = False
+
+    def _refresh_session_bg(self):
+        """Silently refresh the access token using the stored refresh token."""
+        try:
+            res = self._client.auth.refresh_session()
+            if res and res.session:
+                self._save_session(res.session)
+        except Exception:
+            pass
 
     def configure(self, url: str, key: str) -> tuple[bool, str]:
         """Configure Supabase via UI. Not available when env-locked."""

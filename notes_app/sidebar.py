@@ -17,6 +17,7 @@ class SidebarPanel(QWidget):
     note_moved = pyqtSignal(str, str, str, str, str)  # (src_nb, src_sec, slug, dst_nb, dst_sec)
     tag_selected = pyqtSignal(str)
     tag_cleared = pyqtSignal()
+    delete_tag_requested = pyqtSignal(str)
     theme_toggle_requested = pyqtSignal()
     notebook_sort_changed = pyqtSignal(str)   # sort mode
     pinned_all_requested = pyqtSignal()
@@ -244,12 +245,33 @@ class SidebarPanel(QWidget):
             )
             self._tags_layout.addWidget(no_tags_lbl)
         for tag in all_tags:
+            row = QWidget()
+            row.setStyleSheet("background: transparent;")
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(0, 0, 0, 0)
+            rl.setSpacing(0)
+
             btn = QPushButton(f"  {tag}")
             btn.setCheckable(True)
             btn.setChecked(tag == self._active_tag)
             btn.setStyleSheet(self._tag_btn_style(t))
             btn.clicked.connect(lambda _, tg=tag: self._on_tag_clicked(tg))
-            self._tags_layout.addWidget(btn)
+            rl.addWidget(btn, 1)
+
+            del_btn = QPushButton("×")
+            del_btn.setFixedSize(20, 20)
+            del_btn.setToolTip(f"Remove tag '{tag}' from all notes")
+            del_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent; color: {t['muted2']};
+                    border: none; font-size: 15px; padding: 0;
+                }}
+                QPushButton:hover {{ color: {t['priority_high']}; }}
+            """)
+            del_btn.clicked.connect(lambda _, tg=tag: self.delete_tag_requested.emit(tg))
+            rl.addWidget(del_btn)
+
+            self._tags_layout.addWidget(row)
             self._tag_buttons[tag] = btn
         self._tags_layout.addStretch()
 

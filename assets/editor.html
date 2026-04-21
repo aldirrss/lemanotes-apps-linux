@@ -161,15 +161,6 @@
     white-space: pre !important;
   }
 
-  /* TUI own code block container */
-  .toastui-editor-ww-code-block-language {
-    background: var(--bg3) !important;
-    color: var(--muted) !important;
-    font-family: 'JetBrains Mono', monospace !important;
-    font-size: 0.75em !important;
-    border-bottom: 1px solid var(--border) !important;
-    padding: 4px 14px !important;
-  }
   .toastui-editor-ww-code-block pre {
     margin: 0 !important;
     border: none !important;
@@ -520,6 +511,27 @@
     document.documentElement.style.setProperty('--font-size', size + 'px');
   }
 
+  // Helper: get ProseMirror EditorView — handles TUI v3 (editor.wwEditor.getEditorView)
+  // and older TUI paths (editor._editor.wwe.getEditor).
+  function _getPM() {
+    if (!editor) return null;
+    try {
+      if (editor.wwEditor && editor.wwEditor.getEditorView) {
+        var v = editor.wwEditor.getEditorView();
+        if (v) return v;
+      }
+      var core = editor._editor;
+      if (core) {
+        var wwe = core.wwEditor || core.wwe;
+        if (wwe) {
+          if (wwe.getEditorView) { var v2 = wwe.getEditorView(); if (v2) return v2; }
+          if (wwe.getEditor)     { var v3 = wwe.getEditor();     if (v3) return v3; }
+        }
+      }
+    } catch(e) {}
+    return null;
+  }
+
   function initEditor() {
     editor = new toastui.Editor({
       el: document.getElementById('editor'),
@@ -560,6 +572,14 @@
 
   function applyHighlighting() {
     if (typeof hljs === 'undefined') return;
+    // Modifying innerHTML inside ProseMirror while editor (or any child) is focused
+    // causes PM to detect a DOM mutation and reset the cursor to position 0.
+    // Skip highlighting whenever the editor container owns focus.
+    var active = document.activeElement;
+    if (active) {
+      var editorEl = document.getElementById('editor');
+      if (editorEl && editorEl.contains(active)) return;
+    }
     document.querySelectorAll(
       '.ProseMirror pre code, .toastui-editor-contents pre code, ' +
       '.toastui-editor-ww-code-block pre code'
@@ -621,9 +641,7 @@
   function getActiveFormats() {
     if (!editor) return {};
     try {
-      var core = editor._editor;
-      var wwe  = core && (core.wwEditor || core.wwe);
-      var pm   = wwe && wwe.getEditor && wwe.getEditor();
+      var pm = _getPM();
       if (!pm) return {};
       var state = pm.state;
       var sel   = state.selection;
@@ -735,8 +753,7 @@
     if (active.heading === level) {
       // Already this heading level → convert back to paragraph
       try {
-        var wwe = editor._editor && (editor._editor.wwEditor || editor._editor.wwe);
-        var pm  = wwe && wwe.getEditor && wwe.getEditor();
+        var pm = _getPM();
         if (pm && pm.state.schema.nodes.paragraph) {
           var tr = pm.state.tr.setBlockType(
             pm.state.selection.from,
@@ -757,8 +774,7 @@
   function setParagraph() {
     if (!editor) return;
     try {
-      var wwe = editor._editor && (editor._editor.wwEditor || editor._editor.wwe);
-      var pm  = wwe && wwe.getEditor && wwe.getEditor();
+      var pm = _getPM();
       if (pm && pm.state.schema.nodes.paragraph) {
         var tr = pm.state.tr.setBlockType(
           pm.state.selection.from,
@@ -773,8 +789,7 @@
   function clearFormat() {
     if (!editor) return;
     try {
-      var wwe = editor._editor && (editor._editor.wwEditor || editor._editor.wwe);
-      var pm  = wwe && wwe.getEditor && wwe.getEditor();
+      var pm = _getPM();
       if (pm) {
         var state = pm.state;
         var from  = state.selection.from;
@@ -825,7 +840,15 @@
   var _searchEl = document.getElementById('slash-search');
   var _listEl   = document.getElementById('slash-list');
 
+  var _savedRange = null; // DOM Range saved before palette opens (used to restore cursor)
+
   function _openPalette() {
+    // Save current DOM selection so we can restore it after the palette closes
+    try {
+      var s = window.getSelection();
+      _savedRange = (s && s.rangeCount) ? s.getRangeAt(0).cloneRange() : null;
+    } catch(e) { _savedRange = null; }
+
     _slashActive    = true;
     _slashInsertPos = null;
     _slashIdx       = 0;
@@ -836,8 +859,7 @@
     // Position: try ProseMirror coordsAtPos first, then Selection API, then fallback
     var placed = false;
     try {
-      var wwe2 = editor._editor && (editor._editor.wwEditor || editor._editor.wwe);
-      var pm2  = wwe2 && wwe2.getEditor && wwe2.getEditor();
+      var pm2 = _getPM();
       if (pm2 && pm2.coordsAtPos) {
         var coords = pm2.coordsAtPos(pm2.state.selection.from);
         var top  = coords.bottom + 6;
@@ -884,31 +906,42 @@
     _slashActive    = false;
     _slashInsertPos = null;
     _palette.classList.remove('open');
-    setTimeout(function() {
-      // Restore editor focus first so cursor is back at the '/' position
-      try { editor.focus(); } catch(e) {}
-      if (deleteSlash) {
-        setTimeout(function() {
-          // execCommand('delete') = Backspace — deletes char before cursor
-          // More reliable than PM internals when focus has moved
-          var deleted = false;
-          try {
-            var wwe = editor._editor && (editor._editor.wwEditor || editor._editor.wwe);
-            var pm  = wwe && wwe.getEditor && wwe.getEditor();
-            if (pm) {
-              var from = pm.state.selection.from;
-              if (from > 0) {
-                pm.dispatch(pm.state.tr.delete(from - 1, from));
-                deleted = true;
-              }
+    if (deleteSlash) {
+      // Primary: delete '/' via ProseMirror (keeps PM state consistent, no cursor reset)
+      var deleted = false;
+      try {
+        var pm = _getPM();
+        if (pm) {
+          var from = pm.state.selection.from;
+          if (from > 0) { pm.dispatch(pm.state.tr.delete(from - 1, from)); deleted = true; }
+        }
+      } catch(e) {}
+
+      // Fallback: restore saved DOM range then extend+delete via Selection API
+      if (!deleted && _savedRange) {
+        try {
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(_savedRange);
+          // Extend selection one character backward to cover '/'
+          if (sel.modify) {
+            sel.modify('extend', 'backward', 'character');
+          } else {
+            var r = _savedRange.cloneRange();
+            var sc = r.startContainer;
+            if (sc.nodeType === 3 && r.startOffset > 0) {
+              r.setStart(sc, r.startOffset - 1);
+              sel.removeAllRanges();
+              sel.addRange(r);
             }
-          } catch(e) {}
-          if (!deleted) {
-            try { document.execCommand('delete'); } catch(e2) {}
           }
-        }, 15);
+          document.execCommand('delete', false, null);
+          deleted = true;
+        } catch(e2) {}
       }
-    }, 20);
+    }
+    _savedRange = null;
+    // editor.focus() intentionally omitted — executed command handles its own focus
   }
 
   function _renderPalette(query) {
@@ -961,8 +994,11 @@
   function _execSlash(idx) {
     var c = _slashFiltered[idx];
     if (!c) return;
-    _closePalette(true);
-    setTimeout(function() { c.cmd(); }, 60);
+    _closePalette(true); // deletes '/' synchronously via PM (or DOM fallback)
+    // Small delay so PM can process the deletion before the command fires.
+    // Do NOT call editor.focus() here — it resets the cursor to position 0.
+    // Each command (exec, insertCodeBlock, etc.) handles its own focus internally.
+    setTimeout(function() { c.cmd(); }, 20);
   }
 
   function _getCaretRect() {
@@ -995,23 +1031,51 @@
     }
   });
 
-  // Intercept "/" — use keyup so the char is already in the editor when we act.
-  // keyup bubbles reliably in QtWebEngine without conflicting with TUI's keymap.
+  // Open slash palette only when '/' is the ONLY character on the current line.
+  // Paths like /etc/nginx don't trigger it.
   document.addEventListener('keyup', function(e) {
     if (!editor || _slashActive) return;
     if (e.key !== '/' && e.code !== 'Slash') return;
-    // Skip if inside a code block
+
+    var shouldOpen = false;
+
+    // Primary: ProseMirror (accurate — knows block structure)
     try {
-      var wwe = editor._editor && (editor._editor.wwEditor || editor._editor.wwe);
-      var pm  = wwe && wwe.getEditor && wwe.getEditor();
+      var pm = _getPM();
       if (pm) {
-        var $from = pm.state.doc.resolve(pm.state.selection.from);
+        var from  = pm.state.selection.from;
+        var $from = pm.state.doc.resolve(from);
         for (var d = $from.depth; d >= 0; d--) {
           if ($from.node(d).type.name === 'code_block') return;
         }
+        shouldOpen = ($from.parentOffset === 1);
       }
     } catch(ex) {}
-    _openPalette();
+
+    // Fallback: DOM selection — works even if PM access fails
+    if (!shouldOpen) {
+      try {
+        var sel = window.getSelection();
+        if (sel && sel.rangeCount) {
+          var node = sel.anchorNode;
+          var el   = node && (node.nodeType === 3 ? node.parentElement : node);
+          // Walk up to nearest block-level element inside ProseMirror
+          while (el && el.parentElement &&
+                 !el.classList.contains('ProseMirror') &&
+                 !['P','H1','H2','H3','H4','LI','BLOCKQUOTE'].includes(el.tagName || '')) {
+            el = el.parentElement;
+          }
+          if (el && !el.classList.contains('ProseMirror')) {
+            // Don't trigger inside code blocks
+            if (!el.closest('pre, .toastui-editor-ww-code-block')) {
+              shouldOpen = (el.textContent === '/');
+            }
+          }
+        }
+      } catch(domErr) {}
+    }
+
+    if (shouldOpen) _openPalette();
   }, true);
 
   // ── Code block language sync ────────────────────────────────────────────────
@@ -1044,10 +1108,10 @@
           var inputs = n.querySelectorAll ? Array.from(n.querySelectorAll(sel)) : [];
           if (n.matches && n.matches(sel)) inputs.push(n);
           inputs.forEach(_bindLangInput);
-          // Also: when a code block is newly created, clear the default data-language
-          // so our ::before bar stays hidden until user actually sets a language
-          var blocks = n.querySelectorAll ? Array.from(n.querySelectorAll('.toastui-editor-ww-code-block pre')) : [];
-          if (n.matches && n.matches('.toastui-editor-ww-code-block pre')) blocks.push(n);
+          // Clear TUI's default 'text' data-language so our ::before bar stays hidden
+          var preSel = '.toastui-editor-ww-code-block pre';
+          var blocks = n.querySelectorAll ? Array.from(n.querySelectorAll(preSel)) : [];
+          if (n.matches && n.matches(preSel)) blocks.push(n);
           blocks.forEach(function(pre) {
             var lang = (pre.getAttribute('data-language') || '').trim();
             if (!lang || lang === 'text') pre.removeAttribute('data-language');
@@ -1061,6 +1125,15 @@
     bridge = channel.objects.bridge;
     initEditor();
     _initCodeLangSync();
+
+    // Apply highlighting when editor loses focus (safe — PM no longer owns the DOM)
+    document.addEventListener('focusout', function(e) {
+      var editorEl = document.getElementById('editor');
+      if (editorEl && editorEl.contains(e.target)) {
+        setTimeout(applyHighlighting, 80);
+      }
+    });
+
   });
 </script>
 </body>
