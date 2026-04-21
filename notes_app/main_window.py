@@ -454,14 +454,12 @@ class MainWindow(QMainWindow):
         locked = sync_manager.is_env_locked()
         if sync_manager.is_logged_in():
             email = sync_manager.get_user_email() or "Logged in"
-            suffix = " (pre-configured)" if locked else ""
-            self._sync_btn.setText(f"☁  {email}{suffix}")
+            self._sync_btn.setText(f"☁  {email}")
             self._login_act.setVisible(False)
             self._logout_act.setVisible(True)
             self._sync_now_act.setEnabled(True)
         else:
-            label = "☁  Sign in (pre-configured)" if locked else "☁  Sign in"
-            self._sync_btn.setText(label)
+            self._sync_btn.setText("☁  Sign in")
             self._login_act.setVisible(True)
             self._logout_act.setVisible(False)
             self._sync_now_act.setEnabled(False)
@@ -522,15 +520,14 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Registration Failed", msg)
         elif result == 3:
             self._open_setup()
+        # result == 4 means OAuth was chosen — flow handled via oauth_requested signal
 
     def _do_oauth(self, provider: str):
         sig = self._sync_sig
         sig.status.emit("syncing")
         def on_done(success: bool, error: str):
             if success:
-                sig.status.emit("synced")
-                # refresh UI via signal after login
-                sig.status.emit("__refresh__")
+                sig.status.emit("__after_login__")
             else:
                 sig.status.emit(f"error:{error}")
         sync_manager.login_oauth(provider, on_done)
@@ -557,6 +554,8 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"Sync error: {status[6:]}", 4000)
         elif status == "__refresh__":
             self._refresh_sync_ui()
+        elif status == "__after_login__":
+            self._after_login()
         elif status.startswith("__pulled:"):
             count = status.split(":")[1]
             self._refresh_sync_ui()

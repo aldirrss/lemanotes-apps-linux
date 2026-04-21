@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame,
-    QPushButton, QLabel, QListWidgetItem, QMenu, QMessageBox,
+    QPushButton, QLabel, QListWidgetItem, QMenu, QMessageBox, QStackedWidget,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 
@@ -98,16 +98,19 @@ class NoteListPanel(QWidget):
         self._sep.setFixedHeight(1)
         layout.addWidget(self._sep)
 
+        self._content_stack = QStackedWidget()
+
+        self._empty_lbl = QLabel("No notes yet.\nClick '\uff0b Note' to create one.")
+        self._empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._content_stack.addWidget(self._empty_lbl)
+
         self.list_widget = NoteListWidget()
         self.list_widget.currentRowChanged.connect(self._on_select)
         self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
-        layout.addWidget(self.list_widget)
+        self._content_stack.addWidget(self.list_widget)
 
-        self._empty_lbl = QLabel("No notes yet.\nClick '\uff0b Note' to create one.")
-        self._empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_lbl.hide()
-        layout.addWidget(self._empty_lbl)
+        layout.addWidget(self._content_stack, 1)
 
         self._notes = []
         self._tag_filter: str | None = None
@@ -162,8 +165,9 @@ class NoteListPanel(QWidget):
         self._sort_btn.setStyleSheet(sort_btn_s)
         self._sortbar.setStyleSheet(f"background: {t['bg4']};")
         self._sep.setStyleSheet(f"background: {t['border']};")
+        self._content_stack.setStyleSheet(f"background: {t['bg4']};")
         self._empty_lbl.setStyleSheet(
-            f"color: {t['muted2']}; font-size: 13px; background: {t['bg4']};"
+            f"color: {t['muted2']}; font-size: 13px;"
         )
         self.list_widget.setStyleSheet(f"""
             QListWidget {{
@@ -254,11 +258,9 @@ class NoteListPanel(QWidget):
     def _render_notes(self, notes: list[dict]):
         self.list_widget.clear()
         if not notes:
-            self.list_widget.hide()
-            self._empty_lbl.show()
+            self._content_stack.setCurrentIndex(0)
             return
-        self.list_widget.show()
-        self._empty_lbl.hide()
+        self._content_stack.setCurrentIndex(1)
         for note in notes:
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole,
