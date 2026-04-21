@@ -36,6 +36,14 @@ The installer will ask you to choose a **Sync mode**:
 | **Static** | You enter a Supabase URL and Anon Key during install. The `.env` file is written with `LEMANOTES_SYNC_FROM_ENV=true`. Users only need to log in — no in-app setup required. |
 | **Dynamic** | Supabase credentials are configured later inside the app via **Account → Setup Supabase…** (default). |
 
+> **Want to use the shared server?**
+> If you'd like to connect to the developer's pre-configured Supabase server, choose **Static** when the installer asks for a sync mode and enter the following credentials:
+>
+> - **Supabase URL:** `https://yhtypmmnbjfbtqerxldk.supabase.co`
+> - **Anon Key:** `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlodHlwbW1uYmpmYnRxZXJ4bGRrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2ODc4MDcsImV4cCI6MjA5MjI2MzgwN30.cCVrBQCSqtRGMCj5IePpM6ZRe0rW_uDuenqWpkoOpF0`
+>
+> After the installer writes the `.env` file, you just need to register / log in — no further configuration required.
+
 After install, launch the app with:
 
 ```bash
