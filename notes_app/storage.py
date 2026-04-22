@@ -194,6 +194,17 @@ def load_note(notebook: str, slug: str,
     }
 
 
+def rename_note(notebook: str, slug: str, new_title: str,
+                section: str | None = None) -> bool:
+    if not _md_path(notebook, slug, section).exists():
+        return False
+    meta = _load_meta(notebook, slug, section)
+    meta["title"] = new_title
+    meta["updated_at"] = datetime.now().isoformat()
+    _save_meta(notebook, slug, meta, section)
+    return True
+
+
 def save_note(notebook: str, slug: str, content: str,
               title: str = None, tags: list[str] = None,
               section: str | None = None) -> bool:
@@ -309,6 +320,28 @@ def get_all_tags() -> list[str]:
             for note in list_notes(nb, sec):
                 tags.update(note.get("tags", []))
     return sorted(tags)
+
+
+def remove_tag_from_all(tag: str) -> int:
+    """Remove a tag from every note that has it. Returns count of modified notes."""
+    count = 0
+    for nb in list_notebooks():
+        for note in list_notes(nb):
+            if tag in note.get("tags", []):
+                meta = _load_meta(nb, note["slug"])
+                meta["tags"] = [t for t in meta.get("tags", []) if t != tag]
+                meta["updated_at"] = datetime.now().isoformat()
+                _save_meta(nb, note["slug"], meta)
+                count += 1
+        for sec in list_sections(nb):
+            for note in list_notes(nb, sec):
+                if tag in note.get("tags", []):
+                    meta = _load_meta(nb, note["slug"], sec)
+                    meta["tags"] = [t for t in meta.get("tags", []) if t != tag]
+                    meta["updated_at"] = datetime.now().isoformat()
+                    _save_meta(nb, note["slug"], meta, sec)
+                    count += 1
+    return count
 
 
 def filter_by_tag(tag: str) -> list[dict]:

@@ -9,7 +9,7 @@ from PyQt6.QtGui import QColor, QDrag
 from notes_app.themes import THEMES
 
 
-_NOTE_MIME = "application/x-notesup-note"
+_NOTE_MIME = "application/x-lemanotes-note"
 
 
 # ─── Tag Pill ─────────────────────────────────────────────────────────────────

@@ -2,13 +2,47 @@ from PyQt6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QDialogButtonBox, QLineEdit, QSpinBox, QComboBox,
     QPushButton, QLabel, QTabWidget, QTreeWidget, QTreeWidgetItem,
-    QHeaderView,
+    QHeaderView, QMessageBox, QGraphicsDropShadowEffect,
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import Qt, pyqtSignal, QByteArray, QSize
+from PyQt6.QtGui import QColor, QPixmap, QIcon
 
 from notes_app.themes import THEMES
 from notes_app.shortcuts import SHORTCUTS, _MANDATORY_SHORTCUTS
+
+_GITHUB_SVG = b"""<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path fill="white" d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387
+.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416
+-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729
+1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997
+.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931
+0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176
+0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0 1 12 5.803c1.02.005
+2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653
+.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807
+5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694
+.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/>
+</svg>"""
+
+_GOOGLE_SVG = b"""<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92
+c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+<path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77
+c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84
+C3.99 20.53 7.7 23 12 23z"/>
+<path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43
+.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+<path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15
+C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84
+c.87-2.6 3.3-4.53 6.16-4.53z"/>
+</svg>"""
+
+
+def _svg_icon(svg_bytes: bytes, size: int = 18) -> QIcon:
+    pm = QPixmap()
+    pm.loadFromData(QByteArray(svg_bytes), "SVG")
+    return QIcon(pm.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
+                           Qt.TransformationMode.SmoothTransformation))
 
 
 def _dialog_style(t: dict) -> str:
@@ -36,6 +70,224 @@ def _dialog_style(t: dict) -> str:
             selection-background-color: {t['item_sel']};
         }}
     """
+
+
+class PromptDialog(QDialog):
+    """
+    Styled frameless input dialog.
+    Usage:
+        text, ok = PromptDialog.get_text(parent, "New Note", "Note title",
+                                          icon="📝", text="", theme=t)
+    """
+
+    def __init__(self, parent, title: str, label: str,
+                 icon: str = "✏️", text: str = "", theme: dict = None):
+        super().__init__(parent)
+        t = theme or {}
+
+        self.setWindowFlags(
+            Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedWidth(420)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(16, 16, 16, 20)
+
+        card = QWidget()
+        card.setObjectName("card")
+        card.setStyleSheet(f"""
+            #card {{
+                background: {t.get('bg3', '#18183A')};
+                border: 1px solid {t.get('border2', '#3A3A7A')};
+                border-radius: 14px;
+            }}
+        """)
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(40)
+        shadow.setOffset(0, 6)
+        shadow.setColor(QColor(0, 0, 0, 100))
+        card.setGraphicsEffect(shadow)
+        outer.addWidget(card)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setSpacing(0)
+
+        # ── Header ────────────────────────────────────────────────────
+        header = QHBoxLayout()
+        header.setSpacing(12)
+
+        icon_lbl = QLabel(icon)
+        icon_lbl.setFixedSize(42, 42)
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setStyleSheet(f"""
+            QLabel {{
+                background: {t.get('item_sel', '#2A2A5A')};
+                border-radius: 12px;
+                font-size: 20px;
+            }}
+        """)
+
+        title_lbl = QLabel(title)
+        title_lbl.setStyleSheet(f"""
+            QLabel {{
+                color: {t.get('text2', '#F0EEFF')};
+                font-size: 16px;
+                font-weight: 700;
+                letter-spacing: 0.2px;
+                background: transparent;
+            }}
+        """)
+
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(28, 28)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {t.get('muted2', '#4A487A')};
+                border: none;
+                border-radius: 14px;
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                background: {t.get('item_hover', '#32326A')};
+                color: {t.get('text', '#E2E0FF')};
+            }}
+        """)
+        close_btn.clicked.connect(self.reject)
+
+        header.addWidget(icon_lbl)
+        header.addWidget(title_lbl)
+        header.addStretch()
+        header.addWidget(close_btn)
+        layout.addLayout(header)
+        layout.addSpacing(20)
+
+        # ── Label ─────────────────────────────────────────────────────
+        label_lbl = QLabel(label.upper())
+        label_lbl.setStyleSheet(f"""
+            QLabel {{
+                color: {t.get('muted', '#7A78AA')};
+                font-size: 10px;
+                font-weight: 600;
+                letter-spacing: 1.2px;
+                background: transparent;
+            }}
+        """)
+        layout.addWidget(label_lbl)
+        layout.addSpacing(8)
+
+        # ── Input ─────────────────────────────────────────────────────
+        self._input = QLineEdit(text)
+        self._input.setFixedHeight(42)
+        self._input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {t.get('bg', '#0D0D1A')};
+                color: {t.get('text', '#E2E0FF')};
+                border: 1.5px solid {t.get('border', '#2A2A5A')};
+                border-radius: 9px;
+                padding: 0 14px;
+                font-size: 14px;
+            }}
+            QLineEdit:focus {{
+                border-color: {t.get('accent', '#A78BFA')};
+                background: {t.get('bg2', '#12122A')};
+            }}
+        """)
+        self._input.selectAll()
+        self._input.returnPressed.connect(self._accept_if_valid)
+        self._input.textChanged.connect(self._on_text_changed)
+        layout.addWidget(self._input)
+        layout.addSpacing(20)
+
+        # ── Buttons ───────────────────────────────────────────────────
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedHeight(38)
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {t.get('muted', '#7A78AA')};
+                border: 1.5px solid {t.get('border', '#2A2A5A')};
+                border-radius: 8px;
+                padding: 0 20px;
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background: {t.get('item_hover', '#32326A')};
+                color: {t.get('text', '#E2E0FF')};
+                border-color: {t.get('border2', '#3A3A7A')};
+            }}
+        """)
+        cancel_btn.clicked.connect(self.reject)
+
+        self._ok_btn = QPushButton("OK")
+        self._ok_btn.setFixedHeight(38)
+        self._ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._ok_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {t.get('accent', '#A78BFA')};
+                color: {t.get('accent_fg', '#0D0D1A')};
+                border: none;
+                border-radius: 8px;
+                padding: 0 28px;
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: {t.get('accent_hover', '#C4B5FD')};
+            }}
+            QPushButton:disabled {{
+                background: {t.get('border', '#2A2A5A')};
+                color: {t.get('muted2', '#4A487A')};
+            }}
+        """)
+        self._ok_btn.clicked.connect(self._accept_if_valid)
+        self._on_text_changed(text)
+
+        btn_row.addStretch()
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(self._ok_btn)
+        layout.addLayout(btn_row)
+
+        self._drag_pos = None
+
+    def _on_text_changed(self, text: str):
+        self._ok_btn.setEnabled(bool(text.strip()))
+
+    def _accept_if_valid(self):
+        if self._input.text().strip():
+            self.accept()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._input.setFocus()
+        self._input.selectAll()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, e):
+        if self._drag_pos and e.buttons() == Qt.MouseButton.LeftButton:
+            self.move(e.globalPosition().toPoint() - self._drag_pos)
+
+    def mouseReleaseEvent(self, e):
+        self._drag_pos = None
+
+    @staticmethod
+    def get_text(parent, title: str, label: str,
+                 icon: str = "✏️", text: str = "",
+                 theme: dict = None) -> tuple[str, bool]:
+        dlg = PromptDialog(parent, title, label, icon, text, theme)
+        ok = dlg.exec() == QDialog.DialogCode.Accepted
+        return dlg._input.text().strip(), ok
 
 
 class InsertLinkDialog(QDialog):
@@ -357,3 +609,186 @@ class SettingsDialog(QDialog):
 
     def values(self):
         return self.theme_combo.currentData(), self.font_spin.value(), self._get_disabled()
+
+
+# ─── Supabase Setup Dialog ─────────────────────────────────────────────────────
+
+class SyncSetupDialog(QDialog):
+    def __init__(self, parent=None, t=None):
+        super().__init__(parent)
+        t = t or THEMES["dark"]
+        self.setWindowTitle("Setup Supabase")
+        self.setModal(True)
+        self.setFixedSize(460, 200)
+        self.setStyleSheet(_dialog_style(t))
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(20, 16, 20, 16)
+
+        info = QLabel(
+            "Get your URL and Anon Key from\n"
+            "Supabase Dashboard → Project Settings → API"
+        )
+        info.setStyleSheet(f"color: {t['muted']}; font-size: 11px;")
+        layout.addWidget(info)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        self.url_input = QLineEdit()
+        self.url_input.setPlaceholderText("https://xxxx.supabase.co")
+        form.addRow("Project URL:", self.url_input)
+
+        self.key_input = QLineEdit()
+        self.key_input.setPlaceholderText("eyJhbGciOiJIUzI1NiIs...")
+        self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        form.addRow("Anon Key:", self.key_input)
+
+        layout.addLayout(form)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        self._save_btn = btns.button(QDialogButtonBox.StandardButton.Save)
+        self._save_btn.setText("Save & Connect")
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+
+        self.url_input.textChanged.connect(self._check_ready)
+        self.key_input.textChanged.connect(self._check_ready)
+        self._check_ready()
+
+    def _check_ready(self):
+        ok = bool(self.url_input.text().strip() and self.key_input.text().strip())
+        self._save_btn.setEnabled(ok)
+
+    def values(self) -> tuple[str, str]:
+        return self.url_input.text().strip(), self.key_input.text().strip()
+
+
+# ─── Login Dialog ──────────────────────────────────────────────────────────────
+
+class LoginDialog(QDialog):
+    oauth_requested = pyqtSignal(str)  # provider name
+
+    def __init__(self, parent=None, t=None):
+        super().__init__(parent)
+        t = t or THEMES["dark"]
+        self._t = t
+        self.setWindowTitle("Login — LemaNotes Sync")
+        self.setModal(True)
+        self.setFixedSize(380, 320)
+        self.setStyleSheet(_dialog_style(t))
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(24, 20, 24, 16)
+
+        title = QLabel("☁  Sync Across Devices")
+        title.setStyleSheet(f"color: {t['accent']}; font-weight: 700; font-size: 14px;")
+        layout.addWidget(title)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        self.email_input = QLineEdit()
+        self.email_input.setPlaceholderText("you@example.com")
+        form.addRow("Email:", self.email_input)
+
+        self.pass_input = QLineEdit()
+        self.pass_input.setPlaceholderText("Password")
+        self.pass_input.setEchoMode(QLineEdit.EchoMode.Password)
+        form.addRow("Password:", self.pass_input)
+
+        layout.addLayout(form)
+
+        self._err_lbl = QLabel("")
+        self._err_lbl.setStyleSheet(f"color: #e84040; font-size: 11px;")
+        self._err_lbl.setWordWrap(True)
+        self._err_lbl.hide()
+        layout.addWidget(self._err_lbl)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        self._login_btn = QPushButton("Login")
+        self._login_btn.setEnabled(False)
+        self._login_btn.clicked.connect(self.accept)
+        self._register_btn = QPushButton("Register")
+        self._register_btn.setEnabled(False)
+        self._register_btn.setProperty("secondary", True)
+        self._register_btn.clicked.connect(lambda: self.done(2))
+        btn_row.addWidget(self._login_btn)
+        btn_row.addWidget(self._register_btn)
+        layout.addLayout(btn_row)
+
+        sep_lbl = QLabel("── or continue with ──")
+        sep_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sep_lbl.setStyleSheet(f"color: {t['muted2']}; font-size: 10px;")
+        layout.addWidget(sep_lbl)
+
+        oauth_row = QHBoxLayout()
+        oauth_row.setSpacing(8)
+        gh_btn = QPushButton("  GitHub")
+        gh_btn.setIcon(_svg_icon(_GITHUB_SVG, 18))
+        gh_btn.setIconSize(QSize(18, 18))
+        gh_btn.clicked.connect(lambda: self._on_oauth("github"))
+        gh_btn.setStyleSheet(
+            "QPushButton { background: #24292f; color: #ffffff; border: none;"
+            " border-radius: 6px; padding: 6px 14px; font-size: 12px; font-weight: 600; }"
+            "QPushButton:hover { background: #3a3f46; }"
+        )
+        gg_btn = QPushButton("  Google")
+        gg_btn.setIcon(_svg_icon(_GOOGLE_SVG, 18))
+        gg_btn.setIconSize(QSize(18, 18))
+        gg_btn.clicked.connect(lambda: self._on_oauth("google"))
+        gg_btn.setStyleSheet(
+            "QPushButton { background: #ffffff; color: #3c4043; border: 1px solid #dadce0;"
+            " border-radius: 6px; padding: 6px 14px; font-size: 12px; font-weight: 600; }"
+            "QPushButton:hover { background: #f8f9fa; border-color: #c0c0c0; }"
+        )
+        oauth_row.addWidget(gh_btn)
+        oauth_row.addWidget(gg_btn)
+        layout.addLayout(oauth_row)
+
+        setup_btn = QPushButton("⚙  Configure Supabase URL & Key")
+        setup_btn.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {t['muted']}; "
+            f"border: none; font-size: 10px; padding: 0; }}"
+            f"QPushButton:hover {{ color: {t['accent']}; }}"
+        )
+        setup_btn.clicked.connect(lambda: self.done(3))
+        layout.addWidget(setup_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.email_input.textChanged.connect(self._check_ready)
+        self.pass_input.textChanged.connect(self._check_ready)
+        self.pass_input.returnPressed.connect(self._login_btn.click)
+
+        self._login_btn.setStyleSheet(self._btn_style(t, primary=True))
+        self._register_btn.setStyleSheet(self._btn_style(t, primary=False))
+
+    def _btn_style(self, t: dict, primary: bool) -> str:
+        bg = t["accent"] if primary else t["item_sel"]
+        fg = t["accent_fg"] if primary else t["text"]
+        hover = t["accent_hover"] if primary else t["border2"]
+        return (f"QPushButton {{ background: {bg}; color: {fg}; border: 1px solid {t['border']}; "
+                f"border-radius: 4px; padding: 5px 14px; font-size: 12px; }}"
+                f"QPushButton:hover {{ background: {hover}; }}"
+                f"QPushButton:disabled {{ color: {t['muted2']}; }}")
+
+    def _check_ready(self):
+        ok = bool(self.email_input.text().strip() and self.pass_input.text())
+        self._login_btn.setEnabled(ok)
+        self._register_btn.setEnabled(ok)
+
+    def _on_oauth(self, provider: str):
+        self.oauth_requested.emit(provider)
+        self.done(4)  # distinct code — not Accepted(1), Register(2), or Setup(3)
+
+    def show_error(self, msg: str):
+        self._err_lbl.setText(msg)
+        self._err_lbl.show()
+
+    def values(self) -> tuple[str, str]:
+        return self.email_input.text().strip(), self.pass_input.text()

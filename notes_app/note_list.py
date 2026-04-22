@@ -1,11 +1,13 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame,
-    QPushButton, QLabel, QListWidgetItem, QMenu, QMessageBox,
+    QPushButton, QLabel, QListWidgetItem, QMenu, QMessageBox, QStackedWidget,
+    QInputDialog,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 
 from notes_app.themes import THEMES
 from notes_app.widgets import NoteListWidget, TagPill
+from notes_app.dialogs import PromptDialog
 from notes_app import storage
 from notes_app.settings import load_settings, save_settings
 
@@ -27,6 +29,7 @@ class NoteListPanel(QWidget):
     delete_note_requested = pyqtSignal(str, str, str)
     pin_note_requested = pyqtSignal(str, str, str)           # (nb, section, slug)
     priority_changed = pyqtSignal(str, str, str, int)        # (nb, section, slug, priority)
+    rename_note_requested = pyqtSignal(str, str, str, str)   # (nb, section, slug, new_title)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -98,16 +101,19 @@ class NoteListPanel(QWidget):
         self._sep.setFixedHeight(1)
         layout.addWidget(self._sep)
 
+        self._content_stack = QStackedWidget()
+
+        self._empty_lbl = QLabel("No notes yet.\nClick '\uff0b Note' to create one.")
+        self._empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._content_stack.addWidget(self._empty_lbl)
+
         self.list_widget = NoteListWidget()
         self.list_widget.currentRowChanged.connect(self._on_select)
         self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
-        layout.addWidget(self.list_widget)
+        self._content_stack.addWidget(self.list_widget)
 
-        self._empty_lbl = QLabel("No notes yet.\nClick '\uff0b Note' to create one.")
-        self._empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_lbl.hide()
-        layout.addWidget(self._empty_lbl)
+        layout.addWidget(self._content_stack, 1)
 
         self._notes = []
         self._tag_filter: str | None = None
@@ -162,8 +168,9 @@ class NoteListPanel(QWidget):
         self._sort_btn.setStyleSheet(sort_btn_s)
         self._sortbar.setStyleSheet(f"background: {t['bg4']};")
         self._sep.setStyleSheet(f"background: {t['border']};")
+        self._content_stack.setStyleSheet(f"background: {t['bg4']};")
         self._empty_lbl.setStyleSheet(
-            f"color: {t['muted2']}; font-size: 13px; background: {t['bg4']};"
+            f"color: {t['muted2']}; font-size: 13px;"
         )
         self.list_widget.setStyleSheet(f"""
             QListWidget {{
@@ -254,11 +261,9 @@ class NoteListPanel(QWidget):
     def _render_notes(self, notes: list[dict]):
         self.list_widget.clear()
         if not notes:
-            self.list_widget.hide()
-            self._empty_lbl.show()
+            self._content_stack.setCurrentIndex(0)
             return
-        self.list_widget.show()
-        self._empty_lbl.hide()
+        self._content_stack.setCurrentIndex(1)
         for note in notes:
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole,
@@ -372,8 +377,10 @@ class NoteListPanel(QWidget):
         t = self._theme
         menu = QMenu(self)
         menu.setStyleSheet(f"""
-            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; }}
-            QMenu::item:selected {{ background: {t['item_sel']}; }}
+            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: 8px; padding: 4px; }}
+            QMenu::item {{ padding: 6px 16px 6px 12px; border-radius: 5px; color: {t['text']}; margin: 1px 0; }}
+            QMenu::item:selected {{ background: {t['item_sel']}; color: {t['text']}; }}
+            QMenu::separator {{ height: 1px; background: {t['border']}; margin: 4px 8px; }}
         """)
         acts = {}
         for key, label in _SORT_LABELS.items():
@@ -397,13 +404,16 @@ class NoteListPanel(QWidget):
         priority   = extra.get("priority", 0)
         t = self._theme
         menu_ss = f"""
-            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; }}
-            QMenu::item:selected {{ background: {t['item_sel']}; }}
+            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: 8px; padding: 4px; }}
+            QMenu::item {{ padding: 6px 16px 6px 12px; border-radius: 5px; color: {t['text']}; margin: 1px 0; }}
+            QMenu::item:selected {{ background: {t['item_sel']}; color: {t['text']}; }}
+            QMenu::separator {{ height: 1px; background: {t['border']}; margin: 4px 8px; }}
         """
         menu = QMenu(self)
         menu.setStyleSheet(menu_ss)
-        pin_act   = menu.addAction("\U0001f4cc  Unpin" if is_pinned else "\U0001f4cc  Pin")
-        prio_menu = menu.addMenu("  Priority")
+        pin_act    = menu.addAction("\U0001f4cc  Unpin" if is_pinned else "\U0001f4cc  Pin")
+        rename_act = menu.addAction("\u270f\ufe0f  Rename")
+        prio_menu  = menu.addMenu("  Priority")
         prio_menu.setStyleSheet(menu_ss)
         prio_acts = {}
         for lvl, lbl in [(0, "None"), (1, "Low \u25cf"), (2, "Medium \u25cf"), (3, "High \u25cf")]:
@@ -415,6 +425,15 @@ class NoteListPanel(QWidget):
         act = menu.exec(self.list_widget.mapToGlobal(pos))
         if act == pin_act:
             self.pin_note_requested.emit(nb, section, slug)
+        elif act == rename_act:
+            note = storage.load_note(nb, slug, section or None)
+            current_title = note.get("title", "") if note else ""
+            new_title, ok = PromptDialog.get_text(
+                self, "Rename Note", "New title",
+                icon="✏️", text=current_title, theme=self._theme,
+            )
+            if ok and new_title.strip() and new_title.strip() != current_title:
+                self.rename_note_requested.emit(nb, section, slug, new_title.strip())
         elif act in prio_acts:
             self.priority_changed.emit(nb, section, slug, prio_acts[act])
         elif act == del_act:

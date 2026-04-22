@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 from notes_app.themes import THEMES
 from notes_app.widgets import NotebookTreeWidget
+from notes_app.dialogs import PromptDialog
 from notes_app import storage
 
 
@@ -16,6 +17,7 @@ class SidebarPanel(QWidget):
     note_moved = pyqtSignal(str, str, str, str, str)  # (src_nb, src_sec, slug, dst_nb, dst_sec)
     tag_selected = pyqtSignal(str)
     tag_cleared = pyqtSignal()
+    delete_tag_requested = pyqtSignal(str)
     theme_toggle_requested = pyqtSignal()
     notebook_sort_changed = pyqtSignal(str)   # sort mode
     pinned_all_requested = pyqtSignal()
@@ -243,12 +245,33 @@ class SidebarPanel(QWidget):
             )
             self._tags_layout.addWidget(no_tags_lbl)
         for tag in all_tags:
+            row = QWidget()
+            row.setStyleSheet("background: transparent;")
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(0, 0, 0, 0)
+            rl.setSpacing(0)
+
             btn = QPushButton(f"  {tag}")
             btn.setCheckable(True)
             btn.setChecked(tag == self._active_tag)
             btn.setStyleSheet(self._tag_btn_style(t))
             btn.clicked.connect(lambda _, tg=tag: self._on_tag_clicked(tg))
-            self._tags_layout.addWidget(btn)
+            rl.addWidget(btn, 1)
+
+            del_btn = QPushButton("×")
+            del_btn.setFixedSize(20, 20)
+            del_btn.setToolTip(f"Remove tag '{tag}' from all notes")
+            del_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent; color: {t['muted2']};
+                    border: none; font-size: 15px; padding: 0;
+                }}
+                QPushButton:hover {{ color: {t['priority_high']}; }}
+            """)
+            del_btn.clicked.connect(lambda _, tg=tag: self.delete_tag_requested.emit(tg))
+            rl.addWidget(del_btn)
+
+            self._tags_layout.addWidget(row)
             self._tag_buttons[tag] = btn
         self._tags_layout.addStretch()
 
@@ -306,8 +329,10 @@ class SidebarPanel(QWidget):
         t = self._theme
         menu = QMenu(self)
         menu.setStyleSheet(f"""
-            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; }}
-            QMenu::item:selected {{ background: {t['item_sel']}; }}
+            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: 8px; padding: 4px; }}
+            QMenu::item {{ padding: 6px 16px 6px 12px; border-radius: 5px; color: {t['text']}; margin: 1px 0; }}
+            QMenu::item:selected {{ background: {t['item_sel']}; color: {t['text']}; }}
+            QMenu::separator {{ height: 1px; background: {t['border']}; margin: 4px 8px; }}
         """)
         a_z    = menu.addAction("Sort A \u2192 Z")
         z_a    = menu.addAction("Sort Z \u2192 A")
@@ -335,8 +360,10 @@ class SidebarPanel(QWidget):
         t = self._theme
         menu = QMenu(self)
         menu.setStyleSheet(f"""
-            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; }}
-            QMenu::item:selected {{ background: {t['item_sel']}; }}
+            QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: 8px; padding: 4px; }}
+            QMenu::item {{ padding: 6px 16px 6px 12px; border-radius: 5px; color: {t['text']}; margin: 1px 0; }}
+            QMenu::item:selected {{ background: {t['item_sel']}; color: {t['text']}; }}
+            QMenu::separator {{ height: 1px; background: {t['border']}; margin: 4px 8px; }}
         """)
 
         if not sec:
@@ -346,14 +373,20 @@ class SidebarPanel(QWidget):
             delete_act = menu.addAction("Delete Notebook")
             act = menu.exec(e.globalPos())
             if act == add_sec_act:
-                name, ok = QInputDialog.getText(self, "New Section", "Section name:")
+                name, ok = PromptDialog.get_text(
+                    self, "New Section", "Section name",
+                    icon="📄", theme=self._theme,
+                )
                 if ok and name.strip() and not name.strip().startswith("."):
                     if storage.create_section(nb, name.strip()):
                         sec_item = QTreeWidgetItem(item, [f"  \U0001f4c4  {name.strip()}"])
                         sec_item.setData(0, Qt.ItemDataRole.UserRole, (nb, name.strip()))
                         item.setExpanded(True)
             elif act == rename_act:
-                new_name, ok = QInputDialog.getText(self, "Rename Notebook", "New name:", text=nb)
+                new_name, ok = PromptDialog.get_text(
+                    self, "Rename Notebook", "New name",
+                    icon="✏️", text=nb, theme=self._theme,
+                )
                 if ok and new_name.strip():
                     if storage.rename_notebook(nb, new_name.strip()):
                         item.setText(0, f"  \U0001f4c1  {new_name.strip()}")
@@ -374,7 +407,10 @@ class SidebarPanel(QWidget):
             delete_act = menu.addAction("Delete Section")
             act = menu.exec(e.globalPos())
             if act == rename_act:
-                new_name, ok = QInputDialog.getText(self, "Rename Section", "New name:", text=sec)
+                new_name, ok = PromptDialog.get_text(
+                    self, "Rename Section", "New name",
+                    icon="✏️", text=sec, theme=self._theme,
+                )
                 if ok and new_name.strip() and not new_name.strip().startswith("."):
                     if storage.rename_section(nb, sec, new_name.strip()):
                         item.setText(0, f"  \U0001f4c4  {new_name.strip()}")
