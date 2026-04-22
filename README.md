@@ -19,9 +19,18 @@ A Linux desktop notes app built with PyQt6, with optional cloud sync via Supabas
 
 ## Installation
 
-### Quick Install (Recommended)
+> **Not sure which option to choose?**
+> Go with **Shared Server** — it takes 2 minutes, requires no configuration, and everything is ready to use immediately.
 
-Run the interactive installer — it handles system packages, Python dependencies, `.env` configuration, and desktop shortcut creation in one step:
+---
+
+## Option 1 — Shared Server (Recommended)
+
+Connect to the developer's pre-configured server. No Supabase account, no database setup, no credentials to manage — just install, create an account, and start taking notes.
+
+**Requirements:** Ubuntu / Debian, Python 3.10+, `sudo` access.
+
+### Step 1 — Run the installer
 
 ```bash
 cd lemanotes-apps
@@ -29,38 +38,73 @@ chmod +x install.sh
 ./install.sh
 ```
 
-The installer will ask you to choose a **Sync mode**:
+### Step 2 — Choose Shared Server
 
-| Mode | Description |
-|---|---|
-| **Static** | You enter a Supabase URL and Anon Key during install. The `.env` file is written with `LEMANOTES_SYNC_FROM_ENV=true`. Users only need to log in — no in-app setup required. |
-| **Dynamic** | Supabase credentials are configured later inside the app via **Account → Setup Supabase…** (default). |
+When the installer asks **"Which database server do you want to use?"**, press **Enter** to accept the default:
 
-> **Want to use the shared server?**
-> If you'd like to connect to the developer's pre-configured Supabase server, choose **Static** when the installer asks for a sync mode and enter the following credentials:
->
-> - **Supabase URL:** `https://yhtypmmnbjfbtqerxldk.supabase.co`
-> - **Anon Key:** `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlodHlwbW1uYmpmYnRxZXJ4bGRrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2ODc4MDcsImV4cCI6MjA5MjI2MzgwN30.cCVrBQCSqtRGMCj5IePpM6ZRe0rW_uDuenqWpkoOpF0`
->
-> After the installer writes the `.env` file, you just need to register / log in — no further configuration required.
+```
+▶  1)  Shared Server (recommended)   ← default
+   2)  Self Hosted (my own Supabase)
+```
 
-After install, launch the app with:
+The installer writes the server credentials automatically. No manual input required.
+
+### Step 3 — Launch and register
 
 ```bash
 lemanotes
 # or open it from the app launcher / desktop icon
 ```
 
-> **Requirements:** Ubuntu / Debian with `sudo` access, Python 3.10+.
+Go to **Account → Sign in…** and register a new account. Your notes will sync automatically across any machine using the same account.
 
-The installer detects Python automatically in this order:
+---
+
+## Option 2 — Self Hosted (Advanced)
+
+Use your own Supabase project. Choose this if you want full control over the backend and data storage.
+
+**Requirements:** Ubuntu / Debian, Python 3.10+, `sudo` access, a [Supabase](https://supabase.com) account.
+
+Before installing, complete the [Supabase setup](#cloud-sync-setup-supabase) steps below to create the database table and get your credentials.
+
+### Step 1 — Run the installer
+
+```bash
+cd lemanotes-apps
+chmod +x install.sh
+./install.sh
+```
+
+### Step 2 — Choose Self Hosted
+
+When asked **"Which database server?"**, select **Self Hosted**, then choose a sync mode:
+
+| Mode | Description |
+|---|---|
+| **Static** | Enter your Supabase URL and Anon Key during install. Credentials are written to `.env`. Users only need to log in — no in-app setup. |
+| **Dynamic** | Skip credentials for now. Users configure them later inside the app via **Account → Setup Supabase…** |
+
+### Step 3 — Launch
+
+```bash
+lemanotes
+```
+
+---
+
+### Python Detection
+
+The installer finds a suitable Python environment automatically, in this order:
 
 1. **Active conda environment** (if running inside one)
 2. **Any conda environment** that already has PyQt6
-3. **System Python** (`python3`) that already has PyQt6
-4. **Auto venv** — if none of the above work, a self-contained virtual environment is created at `~/.local/lib/lemanotes/venv/` and all dependencies are installed there automatically
+3. **System Python** that already has PyQt6
+4. **Auto venv** — creates a self-contained environment at `~/.local/lib/lemanotes/venv/` and installs all dependencies there
 
 No conda or pre-installed packages required — it just works.
+
+---
 
 ### Uninstall
 
@@ -69,28 +113,26 @@ chmod +x uninstall.sh
 ./uninstall.sh
 ```
 
-Removes app files (`~/.local/lib/lemanotes/`), desktop shortcut, and the `lemanotes` CLI launcher.  
+Removes app files (`~/.local/lib/lemanotes/`), desktop shortcut, and the `lemanotes` CLI launcher.
 Your notes (`~/LemaNotes/`) and settings (`~/.config/lemanotes/`) are **not** deleted.
 
 To also remove notes and settings:
+
 ```bash
 rm -rf ~/LemaNotes ~/.config/lemanotes
 ```
 
 ### Reinstall
 
-Run uninstall first, then install again:
-
 ```bash
-./uninstall.sh
-./install.sh
+./uninstall.sh && ./install.sh
 ```
 
 ---
 
 ### Manual Installation
 
-### 1. System Dependencies (Ubuntu / Debian)
+#### 1. System Dependencies (Ubuntu / Debian)
 
 ```bash
 sudo apt install -y libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 \
@@ -100,14 +142,9 @@ sudo apt install -y libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 \
 sudo apt install -y python3-pyqt6.qtwebengine
 ```
 
-### 2. Python Dependencies
+#### 2. Python Dependencies
 
 ```bash
-# Conda (recommended)
-conda activate python3.11
-pip install -r requirements.txt
-
-# Or with plain pip
 pip install -r requirements.txt
 ```
 
@@ -119,7 +156,7 @@ supabase>=2.0.0
 python-dotenv>=1.0.0
 ```
 
-### 3. Run
+#### 3. Run
 
 ```bash
 cd lemanotes-apps

@@ -1052,24 +1052,25 @@
       }
     } catch(ex) {}
 
-    // Fallback: DOM selection — works even if PM access fails
+    // Fallback: DOM selection.
+    // Check the text node itself, then walk up one level at a time and stop as
+    // soon as we find an element whose trimmed textContent equals '/'.
+    // This works regardless of how many wrapper elements TUI inserts.
     if (!shouldOpen) {
       try {
-        var sel = window.getSelection();
-        if (sel && sel.rangeCount) {
-          var node = sel.anchorNode;
-          var el   = node && (node.nodeType === 3 ? node.parentElement : node);
-          // Walk up to nearest block-level element inside ProseMirror
-          while (el && el.parentElement &&
-                 !el.classList.contains('ProseMirror') &&
-                 !['P','H1','H2','H3','H4','LI','BLOCKQUOTE'].includes(el.tagName || '')) {
+        var wsel = window.getSelection();
+        if (wsel && wsel.rangeCount) {
+          var an = wsel.anchorNode;
+          // Start from the text node (or element) the cursor is in
+          var el = an && (an.nodeType === 3 ? an.parentElement : an);
+          // Walk up at most 6 levels looking for a node with textContent === '/'
+          for (var i = 0; i < 6 && el; i++) {
+            if (el.closest && el.closest('pre, .toastui-editor-ww-code-block')) break;
+            var t = el.textContent ? el.textContent.trim() : '';
+            if (t === '/') { shouldOpen = true; break; }
+            // Stop searching if this element clearly has more than one character
+            if (t.length > 1) break;
             el = el.parentElement;
-          }
-          if (el && !el.classList.contains('ProseMirror')) {
-            // Don't trigger inside code blocks
-            if (!el.closest('pre, .toastui-editor-ww-code-block')) {
-              shouldOpen = (el.textContent === '/');
-            }
           }
         }
       } catch(domErr) {}

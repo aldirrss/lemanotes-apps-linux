@@ -42,11 +42,17 @@ _dialog_box() {
 ask_choice() {
     local title="$1" question="$2" opt1="$3" opt2="$4"
     if $HAS_ZENITY; then
-        zenity --list --title="$title" \
+        # --question with custom button labels is much cleaner than --list radiolist
+        if zenity --question \
+               --title="$title" \
                --text="$(echo -e "$question")" \
-               --radiolist --column="" --column="Option" \
-               TRUE "$opt1" FALSE "$opt2" \
-               --width=540 --height=300 2>/dev/null || echo "$opt1"
+               --ok-label="$opt1" \
+               --cancel-label="$opt2" \
+               --width=460 2>/dev/null; then
+            echo "$opt1"
+        else
+            echo "$opt2"
+        fi
         return
     fi
     _dialog_box "$title"
@@ -97,11 +103,9 @@ show_info() {
 
 # ── Banner ─────────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${CYAN}${BOLD}  ╔══════════════════════════════════════════════════════════╗${RESET}"
-echo -e "${CYAN}${BOLD}  ║                                                          ║${RESET}"
-echo -e "${CYAN}${BOLD}  ║  ${WHITE}  ✦  LemaNotes Installer                             ${CYAN}${BOLD}║${RESET}"
-echo -e "${CYAN}${BOLD}  ║                                                          ║${RESET}"
-echo -e "${CYAN}${BOLD}  ╚══════════════════════════════════════════════════════════╝${RESET}"
+echo -e "${CYAN}${BOLD}  ╔═══════════════════════════════════════╗${RESET}"
+echo -e "${CYAN}${BOLD}  ║       LemaNotes  Installer            ║${RESET}"
+echo -e "${CYAN}${BOLD}  ╚═══════════════════════════════════════╝${RESET}"
 echo ""
 
 # ── Step 1 — System dependencies ──────────────────────────────────────────────
@@ -314,23 +318,22 @@ success "CLI launcher: $BIN_DIR/lemanotes"
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}${GREEN}Installation complete!${RESET}"
+echo -e "${GREEN}${BOLD}  ╔════════════════════════════════════════════╗${RESET}"
+echo -e "${GREEN}${BOLD}  ║   LemaNotes installed successfully!        ║${RESET}"
+echo -e "${GREEN}${BOLD}  ╚════════════════════════════════════════════╝${RESET}"
 echo ""
-echo -e "  App installed at  : ${BOLD}$INSTALL_DIR${RESET}"
-echo -e "  Run from terminal : ${BOLD}lemanotes${RESET}"
-echo -e "  Run directly      : ${BOLD}$PYTHON_BIN $INSTALL_DIR/run.py${RESET}"
-echo -e "  Sync mode         : ${BOLD}$SYNC_MODE${RESET}"
+echo -e "  ${DIM}App directory  ${RESET}: ${BOLD}$INSTALL_DIR${RESET}"
+echo -e "  ${DIM}Run in terminal${RESET}: ${CYAN}${BOLD}lemanotes${RESET}"
+echo -e "  ${DIM}Sync mode      ${RESET}: ${YELLOW}${BOLD}$SYNC_MODE${RESET}"
 echo ""
-echo -e "  ${YELLOW}The installer folder can now be safely deleted.${RESET}"
+echo -e "  ${DIM}The installer folder can now be safely deleted.${RESET}"
 echo ""
 
-show_info "LemaNotes installed" \
-"Installation complete!
+show_info "LemaNotes installed successfully!" \
+"App installed at:
+  $INSTALL_DIR
 
-App installed at:
-$INSTALL_DIR
+Run from terminal:  lemanotes
+Sync mode:          $SYNC_MODE
 
-Sync mode: $SYNC_MODE
-
-You can now safely delete this installer folder.
-Launch via app launcher or run: lemanotes"
+You can now safely delete this installer folder."
