@@ -49,6 +49,9 @@ class MainWindow(QMainWindow):
 
         self._sync_sig = _SyncSignal()
         self._sync_sig.status.connect(self._on_sync_status)
+        sync_manager.set_session_refresh_callback(
+            lambda: self._sync_sig.status.emit("__session_refreshed__")
+        )
 
         self._build_ui()
         self._build_menu()
@@ -595,6 +598,8 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"Sync error: {msg}", 8000)
             QMessageBox.warning(self, "Sync Error", msg)
         elif status == "__refresh__":
+            self._refresh_sync_ui()
+        elif status == "__session_refreshed__":
             self._refresh_sync_ui()
         elif status == "__after_login__":
             self._after_login()

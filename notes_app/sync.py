@@ -40,6 +40,8 @@ class SyncManager:
         self._client = None
         self._ready = False
         self._env_locked = False   # True when config comes from .env
+        self._optimistic_logged_in = False  # True while background refresh is pending
+        self._on_session_refresh: "callable | None" = None  # UI callback after refresh
         self._load_config()
 
     # ── Config / init ────────────────────────────────────────────────────────────
@@ -62,11 +64,18 @@ class SyncManager:
             s = load_settings()
             self._init_client(url, key, s.get("supabase_session"))
 
+    def set_session_refresh_callback(self, cb: "callable") -> None:
+        """Register a UI callback invoked (from background thread) after session refresh."""
+        self._on_session_refresh = cb
+
     def _init_client(self, url: str, key: str, session_data: dict | None = None):
         try:
             from supabase import create_client
             self._client = create_client(url, key)
-            if session_data:
+            if session_data and session_data.get("refresh_token"):
+                # Mark optimistic so is_logged_in() returns True immediately while
+                # the background refresh is in flight (access_token may be expired).
+                self._optimistic_logged_in = True
                 try:
                     self._client.auth.set_session(
                         session_data["access_token"],
@@ -74,22 +83,31 @@ class SyncManager:
                     )
                 except Exception:
                     pass
-                # Refresh in background so a restarted app gets a fresh access token
-                # without blocking startup. Refresh token is long-lived; access token
-                # expires in ~1 hour which is why logout happens after restart.
                 threading.Thread(target=self._refresh_session_bg, daemon=True).start()
             self._ready = True
         except Exception:
             self._ready = False
 
     def _refresh_session_bg(self):
-        """Silently refresh the access token using the stored refresh token."""
+        """Refresh access token in background. Clears optimistic flag on failure."""
         try:
             res = self._client.auth.refresh_session()
             if res and res.session:
                 self._save_session(res.session)
+                self._optimistic_logged_in = False  # real session is now active
+            else:
+                self._optimistic_logged_in = False
+                self._clear_stored_session()
         except Exception:
-            pass
+            self._optimistic_logged_in = False
+            self._clear_stored_session()
+        if self._on_session_refresh:
+            self._on_session_refresh()
+
+    def _clear_stored_session(self):
+        s = load_settings()
+        s.pop("supabase_session", None)
+        save_settings(s)
 
     def configure(self, url: str, key: str) -> tuple[bool, str]:
         """Configure Supabase via UI. Not available when env-locked."""
@@ -122,8 +140,9 @@ class SyncManager:
     def is_logged_in(self) -> bool:
         if not self._client:
             return False
+        if self._optimistic_logged_in:
+            return True
         try:
-            # Use local session cache — avoids HTTP round-trip that can fail right after login
             session = self._client.auth.get_session()
             return session is not None and session.user is not None
         except Exception:
@@ -134,9 +153,15 @@ class SyncManager:
             return None
         try:
             session = self._client.auth.get_session()
-            return session.user.email if session and session.user else None
+            if session and session.user:
+                return session.user.email
         except Exception:
-            return None
+            pass
+        # Fallback to stored email during optimistic phase (access_token still pending refresh)
+        if self._optimistic_logged_in:
+            s = load_settings()
+            return s.get("supabase_session", {}).get("user_email")
+        return None
 
     # ── Login methods ────────────────────────────────────────────────────────────
 
@@ -251,6 +276,7 @@ class SyncManager:
         s["supabase_session"] = {
             "access_token": session.access_token,
             "refresh_token": session.refresh_token,
+            "user_email": session.user.email if session.user else None,
         }
         save_settings(s)
 

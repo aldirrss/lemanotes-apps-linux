@@ -10,8 +10,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage
 from PyQt6.QtWebChannel import QWebChannel
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QUrl, QObject, pyqtSlot
-from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QUrl, QObject, pyqtSlot, QMarginsF
+from PyQt6.QtGui import QKeySequence, QShortcut, QPageLayout, QPageSize
 
 from notes_app.themes import THEMES
 from notes_app.shortcuts import _MANDATORY_SHORTCUTS
@@ -149,7 +149,7 @@ class EditorPanel(QWidget):
 
         # Undo / Redo
         _btn("\u21a9", lambda: self._js_cmd("undo"), "Undo (Ctrl+Z)")
-        _btn("\u21aa", lambda: self._js_cmd("redo"), "Redo (Ctrl+Shift+Z)")
+        _btn("\u21aa", lambda: self._js_cmd("redo"), "Redo (Ctrl+Y / Ctrl+Shift+Z)")
         _div()
         # Group 1: inline text
         _btn("B",   lambda: self._js_cmd("bold"),    "Bold (Ctrl+B)",
@@ -284,6 +284,7 @@ class EditorPanel(QWidget):
         return {
             "Ctrl+Z":       (lambda: self._js_cmd("undo"),      self),
             "Ctrl+Shift+Z": (lambda: self._js_cmd("redo"),      self),
+            "Ctrl+Y":       (lambda: self._js_cmd("redo"),      self),
             "Ctrl+B":       (lambda: self._js_cmd("bold"),      self),
             "Ctrl+I":       (lambda: self._js_cmd("italic"),    self),
             "Ctrl+Shift+S": (lambda: self._js_cmd("strike"),    self),
@@ -473,7 +474,12 @@ class EditorPanel(QWidget):
         self.note_loaded.emit(False)
 
     def export_pdf(self, output_path: str):
-        self._wysiwyg.page().printToPdf(output_path)
+        layout = QPageLayout(
+            QPageSize(QPageSize.PageSizeId.A4),
+            QPageLayout.Orientation.Portrait,
+            QMarginsF(15, 15, 15, 15),
+        )
+        self._wysiwyg.page().printToPdf(output_path, layout)
 
     def _toggle_pin(self):
         if not self._notebook or not self._slug:
