@@ -25,6 +25,10 @@ class SidebarPanel(QWidget):
     trash_requested = pyqtSignal()
     section_trash_requested = pyqtSignal(str, str)    # (notebook, section)
     notebook_trash_requested = pyqtSignal(str)        # notebook
+    notebook_export_requested = pyqtSignal(str)       # notebook
+    notebook_import_requested = pyqtSignal(str)       # notebook
+    section_export_requested = pyqtSignal(str, str)   # (notebook, section)
+    section_import_requested = pyqtSignal(str, str)   # (notebook, section)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -403,10 +407,17 @@ class SidebarPanel(QWidget):
         if not sec:
             add_sec_act = menu.addAction("\U0001f4c4  Add Section")
             menu.addSeparator()
+            export_act = menu.addAction("\U0001f4e4  Export Notebook as ZIP")
+            import_act = menu.addAction("\U0001f4e5  Import ZIP as Section")
+            menu.addSeparator()
             rename_act = menu.addAction("Rename Notebook")
             delete_act = menu.addAction("Delete Notebook")
             act = menu.exec(e.globalPos())
-            if act == add_sec_act:
+            if act == export_act:
+                self.notebook_export_requested.emit(nb)
+            elif act == import_act:
+                self.notebook_import_requested.emit(nb)
+            elif act == add_sec_act:
                 name, ok = PromptDialog.get_text(
                     self, "New Section", "Section name",
                     icon="📄", theme=self._theme,
@@ -438,10 +449,17 @@ class SidebarPanel(QWidget):
                     idx = self._tree.indexOfTopLevelItem(item)
                     self._tree.takeTopLevelItem(idx)
         else:
+            export_sec_act = menu.addAction("\U0001f4e4  Export Section as ZIP")
+            import_sec_act = menu.addAction("\U0001f4e5  Import .md as Note")
+            menu.addSeparator()
             rename_act = menu.addAction("Rename Section")
             delete_act = menu.addAction("Delete Section")
             act = menu.exec(e.globalPos())
-            if act == rename_act:
+            if act == export_sec_act:
+                self.section_export_requested.emit(nb, sec)
+            elif act == import_sec_act:
+                self.section_import_requested.emit(nb, sec)
+            elif act == rename_act:
                 new_name, ok = PromptDialog.get_text(
                     self, "Rename Section", "New name",
                     icon="✏️", text=sec, theme=self._theme,

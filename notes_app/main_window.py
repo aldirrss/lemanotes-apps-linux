@@ -96,6 +96,10 @@ class MainWindow(QMainWindow):
         self.sidebar.trash_requested.connect(self._on_trash_requested)
         self.sidebar.section_trash_requested.connect(self._on_section_trash)
         self.sidebar.notebook_trash_requested.connect(self._on_notebook_trash)
+        self.sidebar.notebook_export_requested.connect(self._export_notebook_zip)
+        self.sidebar.notebook_import_requested.connect(self._import_zip_as_section)
+        self.sidebar.section_export_requested.connect(self._export_section_zip)
+        self.sidebar.section_import_requested.connect(self._import_md_into_section)
         main_layout.addWidget(self.sidebar)
 
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -837,10 +841,10 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Export Failed", str(e))
 
-    def _export_notebook_zip(self):
-        if not self._current_notebook:
+    def _export_notebook_zip(self, nb: str = ""):
+        nb = nb or self._current_notebook
+        if not nb:
             return
-        nb = self._current_notebook
         default_name = f"{nb}.zip"
         path, _ = QFileDialog.getSaveFileName(
             self, "Export Notebook as ZIP",
@@ -868,6 +872,126 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"Exported {count} notes to {path}", 4000)
         except Exception as e:
             QMessageBox.warning(self, "Export Failed", str(e))
+
+    def _export_section_zip(self, notebook: str, section: str):
+        """Export all notes in a section as a ZIP file."""
+        default_name = f"{notebook}-{section}.zip"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Section as ZIP",
+            str(Path.home() / default_name),
+            "ZIP Files (*.zip)",
+        )
+        if not path:
+            return
+        try:
+            buf = io.BytesIO()
+            count = 0
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                for note in storage.list_notes(notebook, section):
+                    loaded = storage.load_note(notebook, note["slug"], section)
+                    if loaded:
+                        zf.writestr(f"{note['slug']}.md", loaded.get("content", ""))
+                        count += 1
+            Path(path).write_bytes(buf.getvalue())
+            self.status_bar.showMessage(f"Exported {count} notes to {path}", 4000)
+        except Exception as e:
+            QMessageBox.warning(self, "Export Failed", str(e))
+
+    def _import_zip_as_section(self, notebook: str):
+        """Import a ZIP of .md files as a new section inside notebook."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import ZIP as Section",
+            str(Path.home()),
+            "ZIP Files (*.zip)",
+        )
+        if not path:
+            return
+
+        src = Path(path)
+        default_sec = re.sub(r"\.zip$", "", src.name, flags=re.IGNORECASE) or "Imported"
+        sec_name, ok = QInputDialog.getText(
+            self, "New Section Name",
+            "Section name:",
+            text=default_sec,
+        )
+        if not ok or not sec_name.strip():
+            return
+        sec_name = sec_name.strip()
+
+        try:
+            items = []
+            with zipfile.ZipFile(src, "r") as zf:
+                for info in zf.infolist():
+                    if info.is_dir() or not info.filename.endswith(".md"):
+                        continue
+                    content = zf.read(info).decode("utf-8", errors="replace")
+                    title, content = _extract_title(Path(info.filename).stem, content)
+                    items.append((title, content))
+        except Exception as e:
+            QMessageBox.warning(self, "Import Failed", str(e))
+            return
+
+        if not items:
+            QMessageBox.information(self, "Import", "No .md files found in ZIP.")
+            return
+
+        progress = QProgressDialog(
+            f"Importing into section '{sec_name}'…", "Cancel", 0, len(items), self
+        )
+        progress.setWindowTitle("Importing Notes")
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        QApplication.processEvents()
+
+        count = 0
+        try:
+            storage.create_section(notebook, sec_name)
+            for i, (title, content) in enumerate(items):
+                if progress.wasCanceled():
+                    break
+                progress.setLabelText(f"Importing: {title}")
+                progress.setValue(i)
+                QApplication.processEvents()
+                storage.create_note(notebook, title, content=content, section=sec_name)
+                count += 1
+            progress.setValue(len(items))
+        except Exception as e:
+            progress.close()
+            QMessageBox.warning(self, "Import Failed", str(e))
+            return
+
+        progress.close()
+        self._load_notebooks()
+        self.sidebar.select_notebook(notebook, sec_name)
+        self.status_bar.showMessage(
+            f"Imported {count} note{'s' if count != 1 else ''} into '{notebook}/{sec_name}'", 4000
+        )
+
+    def _import_md_into_section(self, notebook: str, section: str):
+        """Import a single .md file as a new note inside a section."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Markdown File",
+            str(Path.home()),
+            "Markdown Files (*.md)",
+        )
+        if not path:
+            return
+        try:
+            content = Path(path).read_text(encoding="utf-8", errors="replace")
+            title, content = _extract_title(Path(path).stem, content)
+            note = storage.create_note(notebook, title, content=content, section=section)
+            self._load_notebooks()
+            self.sidebar.select_notebook(notebook, section)
+            self.note_list.load_notes(notebook, section)
+            target = (notebook, section, note["slug"])
+            for i in range(self.note_list.list_widget.count()):
+                item = self.note_list.list_widget.item(i)
+                if item and item.data(Qt.ItemDataRole.UserRole) == target:
+                    self.note_list.list_widget.setCurrentRow(i)
+                    break
+            self.status_bar.showMessage(f"Imported '{title}' into '{notebook}/{section}'", 2000)
+        except Exception as e:
+            QMessageBox.warning(self, "Import Failed", str(e))
 
     def _import_notes(self):
         path, _ = QFileDialog.getOpenFileName(
