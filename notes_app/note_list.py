@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QPushButton, QLabel, QListWidgetItem, QMenu, QMessageBox, QStackedWidget,
-    QInputDialog,
+    QInputDialog, QDialog,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 
@@ -389,7 +389,7 @@ class NoteListPanel(QWidget):
                     result = dlg.exec()
                 finally:
                     self._trash_dialog_open = False
-                if result == TrashNoteDialog.Accepted:
+                if result == QDialog.DialogCode.Accepted:
                     self.trash_restore_requested.emit(nb, section, slug)
                 elif result == TrashNoteDialog.PURGE_CODE:
                     self.trash_purge_requested.emit(nb, section, slug)
