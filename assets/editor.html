@@ -767,6 +767,15 @@
     }
   }
 
+  function replaceImageUrl(oldUrl, newUrl) {
+    if (!editor) return;
+    var md = editor.getMarkdown();
+    var updated = md.split(oldUrl).join(newUrl);
+    if (updated !== md) {
+      editor.setMarkdown(updated, false);
+    }
+  }
+
   function insertTable(rows, cols) {
     if (!editor) return;
     try {

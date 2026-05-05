@@ -518,5 +518,42 @@ class SyncManager:
         except Exception as e:
             return str(e)
 
+    def upload_attachment(self, notebook: str, slug: str, section: str | None,
+                          file_path) -> str:
+        """Upload a local attachment file to Supabase Storage.
+
+        Returns the public URL on success, or empty string on failure.
+        """
+        from pathlib import Path as _Path
+        if not self.is_logged_in() or not self._client:
+            return ""
+        try:
+            file_path = _Path(file_path)
+            # Storage path: <user_id>/<notebook>[/<section>]/<slug>/<filename>
+            user_id = self._client.auth.get_user().user.id
+            parts = [user_id, notebook]
+            if section:
+                parts.append(section)
+            parts += [slug, file_path.name]
+            storage_path = "/".join(parts)
+            with open(file_path, "rb") as f:
+                data = f.read()
+            mime = _guess_mime(file_path.suffix)
+            self._client.storage.from_("note-attachments").upload(
+                storage_path, data,
+                {"content-type": mime, "upsert": "true"},
+            )
+            public = self._client.storage.from_("note-attachments").get_public_url(storage_path)
+            return public
+        except Exception:
+            return ""
+
+
+def _guess_mime(suffix: str) -> str:
+    return {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+    }.get(suffix.lower(), "application/octet-stream")
+
 
 sync_manager = SyncManager()

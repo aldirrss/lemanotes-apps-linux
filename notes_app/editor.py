@@ -1,5 +1,7 @@
 import json
+import re
 import shutil
+import threading
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -51,6 +53,7 @@ class EditorPanel(QWidget):
     pdf_export_done = pyqtSignal(str, bool)
     word_count_updated = pyqtSignal(str)
     pin_toggled = pyqtSignal(bool)
+    _attachment_uploaded = pyqtSignal(str, str)  # (local_file_url, cloud_url)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -64,6 +67,7 @@ class EditorPanel(QWidget):
         self._pending_content: str | None = None
 
         self._pinned = False
+        self._sync_manager = None
 
         self._auto_save_timer = QTimer()
         self._auto_save_timer.setSingleShot(True)
@@ -72,6 +76,8 @@ class EditorPanel(QWidget):
         self._word_count_timer = QTimer()
         self._word_count_timer.setInterval(2000)
         self._word_count_timer.timeout.connect(self._poll_word_count)
+
+        self._attachment_uploaded.connect(self._on_attachment_uploaded)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -426,6 +432,48 @@ class EditorPanel(QWidget):
         if self._editor_ready:
             self._wysiwyg.page().runJavaScript(f"setFontSize({size})")
 
+    def set_sync_manager(self, manager):
+        self._sync_manager = manager
+
+    # ── Attachment path helpers ────────────────────────────────────────────────
+
+    def _note_dir(self) -> Path | None:
+        if not self._notebook or not self._slug:
+            return None
+        if self._section:
+            return storage.NOTES_ROOT / self._notebook / self._section
+        return storage.NOTES_ROOT / self._notebook
+
+    def _resolve_attachment_paths(self, content: str) -> str:
+        """Convert relative .attachments/ paths → absolute file:// URLs for display."""
+        note_dir = self._note_dir()
+        if not note_dir:
+            return content
+
+        def _replace(m):
+            alt, rel = m.group(1), m.group(2)
+            abs_path = (note_dir / rel).resolve()
+            return f"![{alt}](file://{abs_path})"
+
+        return re.sub(r'!\[([^\]]*)\]\((\.attachments/[^\)]+)\)', _replace, content)
+
+    def _normalize_attachment_paths(self, content: str) -> str:
+        """Convert local file:// attachment URLs → relative .attachments/ paths for storage."""
+        note_dir = self._note_dir()
+        if not note_dir:
+            return content
+        att_prefix = str(note_dir.resolve()) + "/.attachments/"
+
+        def _replace(m):
+            alt, url = m.group(1), m.group(2)
+            file_path = url[len("file://"):]
+            if file_path.startswith(att_prefix):
+                rel = ".attachments/" + file_path[len(att_prefix):]
+                return f"![{alt}]({rel})"
+            return m.group(0)
+
+        return re.sub(r'!\[([^\]]*)\]\((file://[^\)]+)\)', _replace, content)
+
     # ── Public API ─────────────────────────────────────────────────────────────
 
     def load_note(self, notebook: str, slug: str,
@@ -444,7 +492,7 @@ class EditorPanel(QWidget):
         self.title_input.blockSignals(False)
         self.tag_bar.set_suggestions(storage.get_all_tags())
         self.tag_bar.set_tags(note.get("tags", []))
-        md = note.get("content", "")
+        md = self._resolve_attachment_paths(note.get("content", ""))
         if self._editor_ready:
             self._inject_content(md)
         else:
@@ -551,6 +599,7 @@ class EditorPanel(QWidget):
         if not path:
             return
         use_path = path
+        local_dest: Path | None = None
         if self._notebook and self._slug:
             try:
                 if self._section:
@@ -558,15 +607,22 @@ class EditorPanel(QWidget):
                 else:
                     att_dir = storage.NOTES_ROOT / self._notebook / ".attachments" / self._slug
                 att_dir.mkdir(parents=True, exist_ok=True)
-                dest = att_dir / Path(path).name
-                shutil.copy2(path, dest)
-                use_path = str(dest)
+                local_dest = att_dir / Path(path).name
+                shutil.copy2(path, local_dest)
+                use_path = str(local_dest)
             except Exception:
                 pass
+        local_file_url = "file://" + use_path
         alt = Path(path).stem
         self._wysiwyg.page().runJavaScript(
-            f"insertImage({json.dumps('file://' + use_path)}, {json.dumps(alt)})"
+            f"insertImage({json.dumps(local_file_url)}, {json.dumps(alt)})"
         )
+        if local_dest and self._sync_manager and self._sync_manager.is_logged_in():
+            threading.Thread(
+                target=self._upload_attachment_bg,
+                args=(local_dest, local_file_url),
+                daemon=True,
+            ).start()
 
     def _insert_table(self):
         dlg = InsertTableDialog(self, self._theme)
@@ -654,6 +710,26 @@ class EditorPanel(QWidget):
                  content: str, title: str, tags: list):
         if not content and not title:
             return
-        storage.save_note(notebook, slug, content=content, title=title,
+        normalized = self._normalize_attachment_paths(content)
+        storage.save_note(notebook, slug, content=normalized, title=title,
                           tags=tags, section=section)
         self.note_saved.emit()
+
+    def _upload_attachment_bg(self, local_path: Path, local_file_url: str):
+        """Background thread: upload attachment to Supabase Storage."""
+        try:
+            cloud_url = self._sync_manager.upload_attachment(
+                self._notebook, self._slug, self._section, local_path
+            )
+            if cloud_url:
+                self._attachment_uploaded.emit(local_file_url, cloud_url)
+        except Exception:
+            pass
+
+    @pyqtSlot(str, str)
+    def _on_attachment_uploaded(self, local_file_url: str, cloud_url: str):
+        """Replace local file URL with cloud URL in editor and schedule save."""
+        self._wysiwyg.page().runJavaScript(
+            f"replaceImageUrl({json.dumps(local_file_url)}, {json.dumps(cloud_url)})"
+        )
+        self._schedule_save()

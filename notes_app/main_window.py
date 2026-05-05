@@ -108,6 +108,7 @@ class MainWindow(QMainWindow):
         self._splitter.addWidget(self.note_list)
 
         self.editor_panel = EditorPanel()
+        self.editor_panel.set_sync_manager(sync_manager)
         self.editor_panel.note_saved.connect(self._on_note_saved)
         self.editor_panel.pin_toggled.connect(self._on_note_pin_toggled)
         self._splitter.addWidget(self.editor_panel)
