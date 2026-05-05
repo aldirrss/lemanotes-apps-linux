@@ -67,12 +67,12 @@ class NoteListPanel(QWidget):
         self._new_btn.setFixedHeight(28)
         self._new_btn.setToolTip("New note (Ctrl+N)")
         self._new_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        _new_menu = QMenu(self._new_btn)
-        _new_note_act = _new_menu.addAction("\ud83d\udcdd  New Note")
+        self._new_btn_menu = QMenu(self._new_btn)
+        _new_note_act = self._new_btn_menu.addAction("New Note")
         _new_note_act.triggered.connect(self.new_note_requested)
-        _import_md_act = _new_menu.addAction("\ud83d\udce5  Import .md")
+        _import_md_act = self._new_btn_menu.addAction("Import .md")
         _import_md_act.triggered.connect(self.import_md_requested)
-        self._new_btn.setMenu(_new_menu)
+        self._new_btn.setMenu(self._new_btn_menu)
         tl.addWidget(self._new_btn)
         layout.addWidget(self._toolbar)
 
@@ -156,6 +156,17 @@ class NoteListPanel(QWidget):
             }}
             QToolButton:hover {{ background: {t['accent_hover']}; color: {t['accent_fg']}; }}
             QToolButton::menu-indicator {{ image: none; width: 0; }}
+        """)
+        self._new_btn_menu.setStyleSheet(f"""
+            QMenu {{
+                background: {t['bg3']}; color: {t['text']};
+                border: 1px solid {t['border']}; border-radius: 8px; padding: 4px;
+            }}
+            QMenu::item {{
+                padding: 7px 20px 7px 12px; border-radius: 5px;
+                color: {t['text']}; font-size: 12px; margin: 1px 0;
+            }}
+            QMenu::item:selected {{ background: {t['item_sel']}; color: {t['text']}; }}
         """)
         self._search_wrap.setStyleSheet(f"background: {t['bg4']};")
         self.search_input.setStyleSheet(f"""
