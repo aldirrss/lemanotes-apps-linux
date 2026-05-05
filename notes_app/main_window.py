@@ -3,8 +3,11 @@ Main window — LemaNotes
 Wires together SidebarPanel, NoteListPanel, and EditorPanel.
 """
 
+import io
+import re
 import sys
 import threading
+import zipfile
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -56,6 +59,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._build_menu()
         self.editor_panel.note_loaded.connect(self._export_pdf_act.setEnabled)
+        self.editor_panel.note_loaded.connect(self._export_md_act.setEnabled)
         self.editor_panel.note_loaded.connect(self._on_note_load_state)
         self.editor_panel.pdf_export_done.connect(self._on_pdf_exported)
         self.editor_panel.word_count_updated.connect(self._word_count_lbl.setText)
@@ -151,11 +155,27 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self._trash_act)
 
         file_menu.addSeparator()
+        self._export_md_act = QAction("Export as Markdown\u2026", self)
+        self._export_md_act.setShortcut(QKeySequence("Ctrl+Shift+E"))
+        self._export_md_act.triggered.connect(self._export_md)
+        self._export_md_act.setEnabled(False)
+        file_menu.addAction(self._export_md_act)
+
         self._export_pdf_act = QAction("Export as PDF\u2026", self)
         self._export_pdf_act.setShortcut(QKeySequence("Ctrl+E"))
         self._export_pdf_act.triggered.connect(self._export_pdf)
         self._export_pdf_act.setEnabled(False)
         file_menu.addAction(self._export_pdf_act)
+
+        self._export_nb_act = QAction("Export Notebook as ZIP\u2026", self)
+        self._export_nb_act.triggered.connect(self._export_notebook_zip)
+        self._export_nb_act.setEnabled(False)
+        file_menu.addAction(self._export_nb_act)
+
+        file_menu.addSeparator()
+        self._import_act = QAction("Import from ZIP / Folder\u2026", self)
+        self._import_act.triggered.connect(self._import_notes)
+        file_menu.addAction(self._import_act)
 
         view_menu = self._menubar.addMenu("View")
         self._refresh_act = QAction("Refresh Notes", self)
@@ -302,6 +322,7 @@ class MainWindow(QMainWindow):
     def _on_notebook_selected(self, notebook: str, section: str):
         self._current_notebook = notebook
         self._current_section = section or None
+        self._export_nb_act.setEnabled(bool(notebook))
         self.sidebar.clear_tag_selection()
         self.sidebar.clear_trash_filter()
         self.note_list.exit_trash_mode()
@@ -731,6 +752,143 @@ class MainWindow(QMainWindow):
                 self.status_bar.showMessage("Supabase connected", 2000)
             else:
                 QMessageBox.warning(self, "Connection Failed", err)
+
+    # ── Export / Import ───────────────────────────────────────────────────────
+
+    def _export_md(self):
+        if not self.editor_panel._slug:
+            return
+        title = self.editor_panel.title_input.text().strip() or "note"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export as Markdown",
+            str(Path.home() / f"{title}.md"),
+            "Markdown Files (*.md)",
+        )
+        if not path:
+            return
+        nb = self.editor_panel._notebook
+        slug = self.editor_panel._slug
+        sec = self.editor_panel._section
+        note = storage.load_note(nb, slug, sec)
+        if not note:
+            return
+        try:
+            Path(path).write_text(note.get("content", ""), encoding="utf-8")
+            self.status_bar.showMessage(f"Exported to {path}", 3000)
+        except Exception as e:
+            QMessageBox.warning(self, "Export Failed", str(e))
+
+    def _export_notebook_zip(self):
+        if not self._current_notebook:
+            return
+        nb = self._current_notebook
+        default_name = f"{nb}.zip"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Notebook as ZIP",
+            str(Path.home() / default_name),
+            "ZIP Files (*.zip)",
+        )
+        if not path:
+            return
+        try:
+            buf = io.BytesIO()
+            count = 0
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                for note in storage.list_notes(nb):
+                    loaded = storage.load_note(nb, note["slug"])
+                    if loaded:
+                        zf.writestr(f"{note['slug']}.md", loaded.get("content", ""))
+                        count += 1
+                for sec in storage.list_sections(nb):
+                    for note in storage.list_notes(nb, sec):
+                        loaded = storage.load_note(nb, note["slug"], sec)
+                        if loaded:
+                            zf.writestr(f"{sec}/{note['slug']}.md", loaded.get("content", ""))
+                            count += 1
+            Path(path).write_bytes(buf.getvalue())
+            self.status_bar.showMessage(f"Exported {count} notes to {path}", 4000)
+        except Exception as e:
+            QMessageBox.warning(self, "Export Failed", str(e))
+
+    def _import_notes(self):
+        # Let user pick a .zip file or a folder
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import ZIP",
+            str(Path.home()),
+            "ZIP Files (*.zip)",
+        )
+        if not path:
+            # Fallback: try folder selection
+            path = QFileDialog.getExistingDirectory(
+                self, "Import Folder", str(Path.home())
+            )
+        if not path:
+            return
+
+        src = Path(path)
+        default_nb = re.sub(r"\.zip$", "", src.name, flags=re.IGNORECASE) or "Imported"
+
+        nb_name, ok = QInputDialog.getText(
+            self, "Import as Notebook",
+            "Notebook name:",
+            text=default_nb,
+        )
+        if not ok or not nb_name.strip():
+            return
+        nb_name = nb_name.strip()
+
+        # Avoid overwriting existing notebook
+        existing = storage.list_notebooks()
+        base, suffix = nb_name, 2
+        while nb_name in existing:
+            nb_name = f"{base}-{suffix}"
+            suffix += 1
+
+        try:
+            count = 0
+            if src.is_file() and src.suffix.lower() == ".zip":
+                with zipfile.ZipFile(src, "r") as zf:
+                    for info in zf.infolist():
+                        if info.is_dir() or not info.filename.endswith(".md"):
+                            continue
+                        parts = Path(info.filename).parts
+                        section = parts[0] if len(parts) > 1 else None
+                        content = zf.read(info).decode("utf-8", errors="replace")
+                        title, content = _extract_title(Path(info.filename).stem, content)
+                        slug = storage.slugify(title)
+                        storage.save_note(nb_name, slug, content=content,
+                                          title=title, section=section)
+                        count += 1
+            elif src.is_dir():
+                for md_file in sorted(src.rglob("*.md")):
+                    rel = md_file.relative_to(src)
+                    parts = rel.parts
+                    section = parts[0] if len(parts) > 1 else None
+                    content = md_file.read_text(encoding="utf-8", errors="replace")
+                    title, content = _extract_title(md_file.stem, content)
+                    slug = storage.slugify(title)
+                    storage.save_note(nb_name, slug, content=content,
+                                      title=title, section=section)
+                    count += 1
+
+            self._load_notebooks()
+            # Select the new notebook in sidebar
+            self.sidebar.select_notebook(nb_name)
+            self.status_bar.showMessage(
+                f"Imported {count} note{'s' if count != 1 else ''} into '{nb_name}'", 4000
+            )
+        except Exception as e:
+            QMessageBox.warning(self, "Import Failed", str(e))
+
+
+def _extract_title(filename_stem: str, content: str) -> tuple[str, str]:
+    """Return (title, content) — strips leading H1 from content if present."""
+    first_line = content.lstrip().split("\n")[0]
+    if first_line.startswith("# "):
+        title = first_line[2:].strip()
+        content = content.lstrip()[len(first_line):].lstrip("\n")
+        return title, content
+    return filename_stem.replace("-", " ").replace("_", " ").title(), content
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
