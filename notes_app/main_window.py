@@ -103,6 +103,8 @@ class MainWindow(QMainWindow):
         self.note_list = NoteListPanel()
         self.note_list.note_selected.connect(self._on_note_selected)
         self.note_list.new_note_requested.connect(self._create_note)
+        self.note_list.import_md_requested.connect(self._import_single_md)
+        self.note_list.export_md_requested.connect(self._export_note_md)
         self.note_list.delete_note_requested.connect(self._trash_note)
         self.note_list.pin_note_requested.connect(self._on_pin_requested)
         self.note_list.trash_restore_requested.connect(self._restore_note)
@@ -754,6 +756,57 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Connection Failed", err)
 
     # ── Export / Import ───────────────────────────────────────────────────────
+
+    def _export_note_md(self, notebook: str, section: str, slug: str):
+        """Export a specific note (from right-click) as .md file."""
+        note = storage.load_note(notebook, slug, section or None)
+        if not note:
+            return
+        title = note.get("title", slug).strip() or slug
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export as Markdown",
+            str(Path.home() / f"{title}.md"),
+            "Markdown Files (*.md)",
+        )
+        if not path:
+            return
+        try:
+            Path(path).write_text(note.get("content", ""), encoding="utf-8")
+            self.status_bar.showMessage(f"Exported to {path}", 3000)
+        except Exception as e:
+            QMessageBox.warning(self, "Export Failed", str(e))
+
+    def _import_single_md(self):
+        """Import a single .md file as a new note in the current notebook."""
+        if not self._current_notebook:
+            QMessageBox.information(self, "Import", "Select a notebook first.")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Markdown File",
+            str(Path.home()),
+            "Markdown Files (*.md)",
+        )
+        if not path:
+            return
+        try:
+            content = Path(path).read_text(encoding="utf-8", errors="replace")
+            title, content = _extract_title(Path(path).stem, content)
+            slug = storage.slugify(title)
+            storage.save_note(
+                self._current_notebook, slug,
+                content=content, title=title,
+                section=self._current_section,
+            )
+            self.note_list.load_notes(self._current_notebook, self._current_section)
+            target = (self._current_notebook, self._current_section or "", slug)
+            for i in range(self.note_list.list_widget.count()):
+                item = self.note_list.list_widget.item(i)
+                if item and item.data(Qt.ItemDataRole.UserRole) == target:
+                    self.note_list.list_widget.setCurrentRow(i)
+                    break
+            self.status_bar.showMessage(f"Imported '{title}'", 2000)
+        except Exception as e:
+            QMessageBox.warning(self, "Import Failed", str(e))
 
     def _export_md(self):
         if not self.editor_panel._slug:

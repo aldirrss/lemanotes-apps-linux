@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QPushButton, QLabel, QListWidgetItem, QMenu, QMessageBox, QStackedWidget,
-    QInputDialog, QDialog,
+    QInputDialog, QDialog, QToolButton,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 
@@ -26,6 +26,8 @@ _SORT_LABELS = {
 class NoteListPanel(QWidget):
     note_selected = pyqtSignal(str, str, str)
     new_note_requested = pyqtSignal()
+    import_md_requested = pyqtSignal()                       # trigger import .md
+    export_md_requested = pyqtSignal(str, str, str)          # (nb, section, slug)
     delete_note_requested = pyqtSignal(str, str, str)
     pin_note_requested = pyqtSignal(str, str, str)           # (nb, section, slug)
     priority_changed = pyqtSignal(str, str, str, int)        # (nb, section, slug, priority)
@@ -60,9 +62,17 @@ class NoteListPanel(QWidget):
         self._refresh_btn.setToolTip("Refresh notes (Ctrl+R)")
         self._refresh_btn.clicked.connect(self.refresh)
         tl.addWidget(self._refresh_btn)
-        self._new_btn = QPushButton("\uff0b Note")
+        self._new_btn = QToolButton()
+        self._new_btn.setText("\uff0b Note")
         self._new_btn.setFixedHeight(28)
         self._new_btn.setToolTip("New note (Ctrl+N)")
+        self._new_btn.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        _new_menu = QMenu(self._new_btn)
+        _new_note_act = _new_menu.addAction("\ud83d\udcdd  New Note")
+        _new_note_act.triggered.connect(self.new_note_requested)
+        _import_md_act = _new_menu.addAction("\ud83d\udce5  Import .md")
+        _import_md_act.triggered.connect(self.import_md_requested)
+        self._new_btn.setMenu(_new_menu)
         self._new_btn.clicked.connect(self.new_note_requested)
         tl.addWidget(self._new_btn)
         layout.addWidget(self._toolbar)
@@ -140,12 +150,17 @@ class NoteListPanel(QWidget):
         """
         self._refresh_btn.setStyleSheet(_icon_btn_s)
         self._new_btn.setStyleSheet(f"""
-            QPushButton {{
+            QToolButton {{
                 background: {t['accent']}; color: {t['accent_fg']};
                 border-radius: 14px; font-size: 11px; font-weight: 700;
                 padding: 0 10px; border: none;
             }}
-            QPushButton:hover {{ background: {t['accent_hover']}; color: {t['accent_fg']}; }}
+            QToolButton:hover {{ background: {t['accent_hover']}; color: {t['accent_fg']}; }}
+            QToolButton::menu-button {{
+                border: none; border-left: 1px solid {t['accent_hover']};
+                border-radius: 0 14px 14px 0; width: 16px;
+            }}
+            QToolButton::menu-arrow {{ image: none; }}
         """)
         self._search_wrap.setStyleSheet(f"background: {t['bg4']};")
         self.search_input.setStyleSheet(f"""
@@ -474,11 +489,15 @@ class NoteListPanel(QWidget):
             a = prio_menu.addAction(("\u2713 " if lvl == priority else "   ") + lbl)
             prio_acts[a] = lvl
         menu.addSeparator()
+        export_md_act = menu.addAction("\U0001f4e4  Export as Markdown")
+        menu.addSeparator()
         del_act = menu.addAction("\U0001f5d1  Move to Trash")
 
         act = menu.exec(self.list_widget.mapToGlobal(pos))
         if act == pin_act:
             self.pin_note_requested.emit(nb, section, slug)
+        elif act == export_md_act:
+            self.export_md_requested.emit(nb, section, slug)
         elif act == rename_act:
             note = storage.load_note(nb, slug, section or None)
             current_title = note.get("title", "") if note else ""
