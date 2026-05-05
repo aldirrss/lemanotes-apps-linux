@@ -23,8 +23,8 @@ class SidebarPanel(QWidget):
     pinned_all_requested = pyqtSignal()
     pinned_all_cleared = pyqtSignal()
     trash_requested = pyqtSignal()
-    section_trash_requested = pyqtSignal(str, str)    # (notebook, section)
-    notebook_trash_requested = pyqtSignal(str)        # notebook
+    section_delete_requested = pyqtSignal(str, str)   # (notebook, section)
+    notebook_delete_requested = pyqtSignal(str)       # notebook
     notebook_export_requested = pyqtSignal(str)       # notebook
     notebook_import_requested = pyqtSignal(str)       # notebook
     section_export_requested = pyqtSignal(str, str)   # (notebook, section)
@@ -442,10 +442,10 @@ class SidebarPanel(QWidget):
                             child.setData(0, Qt.ItemDataRole.UserRole, (new_name.strip(), child_sec))
             elif act == delete_act:
                 if QMessageBox.question(
-                    self, "Move to Trash",
-                    f"Move all notes in '{nb}' to Trash?\nThey will be deleted permanently after 7 days."
+                    self, "Delete Notebook",
+                    f"Permanently delete notebook '{nb}' and all its notes?\nThis cannot be undone."
                 ) == QMessageBox.StandardButton.Yes:
-                    self.notebook_trash_requested.emit(nb)
+                    self.notebook_delete_requested.emit(nb)
                     # Tree is refreshed by _load_notebooks() inside the handler
         else:
             export_sec_act = menu.addAction("\U0001f4e4  Export Section as ZIP")
@@ -468,15 +468,9 @@ class SidebarPanel(QWidget):
                         item.setText(0, f"  \U0001f4c4  {new_name.strip()}")
                         item.setData(0, Qt.ItemDataRole.UserRole, (nb, new_name.strip()))
             elif act == delete_act:
-                has_notes = bool(storage.list_notes(nb, sec))
-                msg = (f"Move all notes in section '{sec}' to Trash?\nThey will be deleted permanently after 7 days."
-                       if has_notes else f"Delete empty section '{sec}'?")
-                if QMessageBox.question(self, "Move to Trash", msg) == QMessageBox.StandardButton.Yes:
-                    if has_notes:
-                        self.section_trash_requested.emit(nb, sec)
-                        # Tree refreshed by _load_notebooks() inside the handler
-                    else:
-                        storage.delete_section(nb, sec)
-                        parent = item.parent()
-                        if parent:
-                            parent.removeChild(item)
+                if QMessageBox.question(
+                    self, "Delete Section",
+                    f"Permanently delete section '{sec}' and all its notes?\nThis cannot be undone."
+                ) == QMessageBox.StandardButton.Yes:
+                    self.section_delete_requested.emit(nb, sec)
+                    # Tree refreshed by _load_notebooks() inside the handler

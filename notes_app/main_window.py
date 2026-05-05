@@ -94,8 +94,8 @@ class MainWindow(QMainWindow):
         self.sidebar.pinned_all_cleared.connect(self._on_pinned_all_cleared)
         self.sidebar.notebook_sort_changed.connect(self._on_notebook_sort_changed)
         self.sidebar.trash_requested.connect(self._on_trash_requested)
-        self.sidebar.section_trash_requested.connect(self._on_section_trash)
-        self.sidebar.notebook_trash_requested.connect(self._on_notebook_trash)
+        self.sidebar.section_delete_requested.connect(self._on_section_delete)
+        self.sidebar.notebook_delete_requested.connect(self._on_notebook_delete)
         self.sidebar.notebook_export_requested.connect(self._export_notebook_zip)
         self.sidebar.notebook_import_requested.connect(self._import_zip_as_section)
         self.sidebar.section_export_requested.connect(self._export_section_zip)
@@ -443,42 +443,29 @@ class MainWindow(QMainWindow):
         self.note_list.load_trash()
         self.editor_panel.clear()
 
-    def _on_section_trash(self, notebook: str, section: str):
-        trashed = storage.trash_section(notebook, section)
+    def _on_section_delete(self, notebook: str, section: str):
+        storage.delete_section(notebook, section)
         self.note_list.refresh()
         self.editor_panel.clear()
         self._load_notebooks()
-        self.status_bar.showMessage(
-            f"{len(trashed)} note(s) moved to Trash", 2000
-        )
+        self.status_bar.showMessage(f"Section '{section}' deleted", 2000)
         if sync_manager.is_logged_in():
-            for note in trashed:
-                ta = storage._load_meta(notebook, note["slug"], section).get("trashed_at", "")
-                slug = note["slug"]
-                threading.Thread(
-                    target=lambda nb=notebook, sl=slug, sec=section, t=ta:
-                        sync_manager.trash_note_remote(nb, sl, sec, t),
-                    daemon=True,
-                ).start()
+            threading.Thread(
+                target=lambda: sync_manager.delete_section_remote(notebook, section),
+                daemon=True,
+            ).start()
 
-    def _on_notebook_trash(self, notebook: str):
-        trashed = storage.trash_notebook(notebook)
+    def _on_notebook_delete(self, notebook: str):
+        storage.delete_notebook(notebook)
         self.note_list.refresh()
         self.editor_panel.clear()
         self._load_notebooks()
-        self.status_bar.showMessage(
-            f"{len(trashed)} note(s) moved to Trash", 2000
-        )
+        self.status_bar.showMessage(f"Notebook '{notebook}' deleted", 2000)
         if sync_manager.is_logged_in():
-            for note in trashed:
-                sec = note.get("section")
-                ta = storage._load_meta(notebook, note["slug"], sec).get("trashed_at", "")
-                slug = note["slug"]
-                threading.Thread(
-                    target=lambda nb=notebook, sl=slug, s=sec, t=ta:
-                        sync_manager.trash_note_remote(nb, sl, s, t),
-                    daemon=True,
-                ).start()
+            threading.Thread(
+                target=lambda: sync_manager.delete_notebook_remote(notebook),
+                daemon=True,
+            ).start()
 
     def _startup_cleanup(self):
         count = storage.cleanup_expired_trash()
