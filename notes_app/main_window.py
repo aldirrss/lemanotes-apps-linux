@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter,
     QHBoxLayout, QStatusBar, QLabel,
     QDialog, QInputDialog, QMessageBox, QFileDialog, QPushButton,
+    QProgressDialog,
 )
 from PyQt6.QtCore import Qt, QObject, pyqtSignal
 from PyQt6.QtGui import QAction, QFont, QKeySequence, QIcon
@@ -797,14 +798,13 @@ class MainWindow(QMainWindow):
         try:
             content = Path(path).read_text(encoding="utf-8", errors="replace")
             title, content = _extract_title(Path(path).stem, content)
-            slug = storage.slugify(title)
-            storage.save_note(
-                self._current_notebook, slug,
-                content=content, title=title,
+            note = storage.create_note(
+                self._current_notebook, title,
+                content=content,
                 section=self._current_section,
             )
             self.note_list.load_notes(self._current_notebook, self._current_section)
-            target = (self._current_notebook, self._current_section or "", slug)
+            target = (self._current_notebook, self._current_section or "", note["slug"])
             for i in range(self.note_list.list_widget.count()):
                 item = self.note_list.list_widget.item(i)
                 if item and item.data(Qt.ItemDataRole.UserRole) == target:
@@ -870,14 +870,12 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Export Failed", str(e))
 
     def _import_notes(self):
-        # Let user pick a .zip file or a folder
         path, _ = QFileDialog.getOpenFileName(
             self, "Import ZIP",
             str(Path.home()),
             "ZIP Files (*.zip)",
         )
         if not path:
-            # Fallback: try folder selection
             path = QFileDialog.getExistingDirectory(
                 self, "Import Folder", str(Path.home())
             )
@@ -896,15 +894,15 @@ class MainWindow(QMainWindow):
             return
         nb_name = nb_name.strip()
 
-        # Avoid overwriting existing notebook
         existing = storage.list_notebooks()
         base, suffix = nb_name, 2
         while nb_name in existing:
             nb_name = f"{base}-{suffix}"
             suffix += 1
 
+        # Collect all (content, title, section) tuples before showing progress
         try:
-            count = 0
+            items = []
             if src.is_file() and src.suffix.lower() == ".zip":
                 with zipfile.ZipFile(src, "r") as zf:
                     for info in zf.infolist():
@@ -914,10 +912,7 @@ class MainWindow(QMainWindow):
                         section = parts[0] if len(parts) > 1 else None
                         content = zf.read(info).decode("utf-8", errors="replace")
                         title, content = _extract_title(Path(info.filename).stem, content)
-                        slug = storage.slugify(title)
-                        storage.save_note(nb_name, slug, content=content,
-                                          title=title, section=section)
-                        count += 1
+                        items.append((title, content, section))
             elif src.is_dir():
                 for md_file in sorted(src.rglob("*.md")):
                     rel = md_file.relative_to(src)
@@ -925,19 +920,45 @@ class MainWindow(QMainWindow):
                     section = parts[0] if len(parts) > 1 else None
                     content = md_file.read_text(encoding="utf-8", errors="replace")
                     title, content = _extract_title(md_file.stem, content)
-                    slug = storage.slugify(title)
-                    storage.save_note(nb_name, slug, content=content,
-                                      title=title, section=section)
-                    count += 1
-
-            self._load_notebooks()
-            # Select the new notebook in sidebar
-            self.sidebar.select_notebook(nb_name)
-            self.status_bar.showMessage(
-                f"Imported {count} note{'s' if count != 1 else ''} into '{nb_name}'", 4000
-            )
+                    items.append((title, content, section))
         except Exception as e:
             QMessageBox.warning(self, "Import Failed", str(e))
+            return
+
+        if not items:
+            QMessageBox.information(self, "Import", "No .md files found.")
+            return
+
+        progress = QProgressDialog(
+            f"Importing into '{nb_name}'…", "Cancel", 0, len(items), self
+        )
+        progress.setWindowTitle("Importing Notes")
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        QApplication.processEvents()
+
+        count = 0
+        try:
+            for i, (title, content, section) in enumerate(items):
+                if progress.wasCanceled():
+                    break
+                progress.setLabelText(f"Importing: {title}")
+                progress.setValue(i)
+                QApplication.processEvents()
+                storage.create_note(nb_name, title, content=content, section=section)
+                count += 1
+            progress.setValue(len(items))
+        except Exception as e:
+            progress.close()
+            QMessageBox.warning(self, "Import Failed", str(e))
+            return
+
+        progress.close()
+        self._load_notebooks()
+        self.sidebar.select_notebook(nb_name)
+        self.status_bar.showMessage(
+            f"Imported {count} note{'s' if count != 1 else ''} into '{nb_name}'", 4000
+        )
 
 
 def _extract_title(filename_stem: str, content: str) -> tuple[str, str]:
