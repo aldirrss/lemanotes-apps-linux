@@ -328,6 +328,10 @@ class SidebarPanel(QWidget):
         if hasattr(self, "_trash_filter_btn_ref"):
             self._trash_filter_btn_ref.setChecked(False)
 
+    def clear_notebook_selection(self):
+        self._tree.clearSelection()
+        self._tree.setCurrentItem(None)
+
     def clear_tag_selection(self):
         if self._active_tag and self._active_tag in self._tag_buttons:
             self._tag_buttons[self._active_tag].setChecked(False)

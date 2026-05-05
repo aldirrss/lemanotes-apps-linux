@@ -429,6 +429,12 @@ class MainWindow(QMainWindow):
             ).start()
 
     def _on_trash_requested(self):
+        self.sidebar.clear_notebook_selection()
+        self.sidebar.clear_tag_selection()
+        self.sidebar.clear_pinned_filter()
+        self.sidebar._active_trash_filter = True
+        if hasattr(self.sidebar, "_trash_filter_btn_ref"):
+            self.sidebar._trash_filter_btn_ref.setChecked(True)
         self.note_list.load_trash()
         self.editor_panel.clear()
 
