@@ -146,6 +146,11 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self._new_nb_act)
 
         file_menu.addSeparator()
+        self._trash_act = QAction("\U0001f5d1  Trash", self)
+        self._trash_act.triggered.connect(self._on_trash_requested)
+        file_menu.addAction(self._trash_act)
+
+        file_menu.addSeparator()
         self._export_pdf_act = QAction("Export as PDF\u2026", self)
         self._export_pdf_act.setShortcut(QKeySequence("Ctrl+E"))
         self._export_pdf_act.triggered.connect(self._export_pdf)

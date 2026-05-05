@@ -121,6 +121,7 @@ class NoteListPanel(QWidget):
         self._tag_filter: str | None = None
         self._current_section: str | None = None
         self._trash_mode = False
+        self._trash_dialog_open = False
         self._apply_styles()
 
     def _apply_styles(self):
@@ -277,7 +278,9 @@ class NoteListPanel(QWidget):
         return pinned + normal
 
     def _render_notes(self, notes: list[dict]):
+        self.list_widget.blockSignals(True)
         self.list_widget.clear()
+        self.list_widget.blockSignals(False)
         if not notes:
             self._content_stack.setCurrentIndex(0)
             return
@@ -376,10 +379,16 @@ class NoteListPanel(QWidget):
             return
         nb, section, slug = item.data(Qt.ItemDataRole.UserRole)
         if self._trash_mode:
+            if self._trash_dialog_open:
+                return
             note = storage.load_note(nb, slug, section or None)
             if note:
-                dlg = TrashNoteDialog(note, self._theme, self)
-                result = dlg.exec()
+                self._trash_dialog_open = True
+                try:
+                    dlg = TrashNoteDialog(note, self._theme, self)
+                    result = dlg.exec()
+                finally:
+                    self._trash_dialog_open = False
                 if result == TrashNoteDialog.Accepted:
                     self.trash_restore_requested.emit(nb, section, slug)
                 elif result == TrashNoteDialog.PURGE_CODE:
