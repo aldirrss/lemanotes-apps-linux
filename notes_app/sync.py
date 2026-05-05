@@ -35,6 +35,41 @@ def _load_env_file():
         return values
 
 
+_KEYRING_SERVICE = "lemanotes"
+_KEYRING_KEY = "supabase_session"
+
+
+def _keyring_save(data: dict) -> bool:
+    """Persist session dict in the OS keyring. Returns False if keyring unavailable."""
+    try:
+        import keyring
+        keyring.set_password(_KEYRING_SERVICE, _KEYRING_KEY, json.dumps(data))
+        return True
+    except Exception:
+        return False
+
+
+def _keyring_load() -> "dict | None":
+    """Read session dict from the OS keyring. Returns None if missing or unavailable."""
+    try:
+        import keyring
+        raw = keyring.get_password(_KEYRING_SERVICE, _KEYRING_KEY)
+        if raw:
+            return json.loads(raw)
+    except Exception:
+        pass
+    return None
+
+
+def _keyring_clear() -> None:
+    """Remove session entry from the OS keyring, silently ignoring errors."""
+    try:
+        import keyring
+        keyring.delete_password(_KEYRING_SERVICE, _KEYRING_KEY)
+    except Exception:
+        pass
+
+
 class SyncManager:
     def __init__(self):
         self._client = None
@@ -61,8 +96,17 @@ class SyncManager:
             self._env_locked = False
 
         if url and key:
-            s = load_settings()
-            self._init_client(url, key, s.get("supabase_session"))
+            # Keyring is the primary store; fall back to legacy JSON entry and
+            # migrate it to keyring on the first successful read.
+            session_data = _keyring_load()
+            if session_data is None:
+                s = load_settings()
+                session_data = s.get("supabase_session")
+                if session_data:
+                    if _keyring_save(session_data):
+                        s.pop("supabase_session", None)
+                        save_settings(s)
+            self._init_client(url, key, session_data)
 
     def set_session_refresh_callback(self, cb: "callable") -> None:
         """Register a UI callback invoked (from background thread) after session refresh."""
@@ -105,6 +149,7 @@ class SyncManager:
             self._on_session_refresh()
 
     def _clear_stored_session(self):
+        _keyring_clear()
         s = load_settings()
         s.pop("supabase_session", None)
         save_settings(s)
@@ -159,8 +204,8 @@ class SyncManager:
             pass
         # Fallback to stored email during optimistic phase (access_token still pending refresh)
         if self._optimistic_logged_in:
-            s = load_settings()
-            return s.get("supabase_session", {}).get("user_email")
+            stored = _keyring_load() or load_settings().get("supabase_session", {})
+            return stored.get("user_email")
         return None
 
     # ── Login methods ────────────────────────────────────────────────────────────
@@ -267,18 +312,22 @@ class SyncManager:
                 self._client.auth.sign_out()
             except Exception:
                 pass
+        _keyring_clear()
         s = load_settings()
         s.pop("supabase_session", None)
         save_settings(s)
 
     def _save_session(self, session):
-        s = load_settings()
-        s["supabase_session"] = {
+        data = {
             "access_token": session.access_token,
             "refresh_token": session.refresh_token,
             "user_email": session.user.email if session.user else None,
         }
-        save_settings(s)
+        if not _keyring_save(data):
+            # Keyring unavailable (headless / no daemon) — fall back to JSON.
+            s = load_settings()
+            s["supabase_session"] = data
+            save_settings(s)
 
     # ── Sync operations ──────────────────────────────────────────────────────────
 
