@@ -446,8 +446,7 @@ class SidebarPanel(QWidget):
                     f"Move all notes in '{nb}' to Trash?\nThey will be deleted permanently after 7 days."
                 ) == QMessageBox.StandardButton.Yes:
                     self.notebook_trash_requested.emit(nb)
-                    idx = self._tree.indexOfTopLevelItem(item)
-                    self._tree.takeTopLevelItem(idx)
+                    # Tree is refreshed by _load_notebooks() inside the handler
         else:
             export_sec_act = menu.addAction("\U0001f4e4  Export Section as ZIP")
             import_sec_act = menu.addAction("\U0001f4e5  Import .md as Note")
@@ -475,8 +474,9 @@ class SidebarPanel(QWidget):
                 if QMessageBox.question(self, "Move to Trash", msg) == QMessageBox.StandardButton.Yes:
                     if has_notes:
                         self.section_trash_requested.emit(nb, sec)
+                        # Tree refreshed by _load_notebooks() inside the handler
                     else:
                         storage.delete_section(nb, sec)
-                    parent = item.parent()
-                    if parent:
-                        parent.removeChild(item)
+                        parent = item.parent()
+                        if parent:
+                            parent.removeChild(item)
