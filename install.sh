@@ -149,23 +149,27 @@ if [[ -z "$PYTHON_BIN" ]] && command -v conda &>/dev/null; then
     fi
 fi
 
-# Priority 3: system python that already has PyQt6
+# Priority 3: system python that already has PyQt6 — wrap it in a venv
+#   Use --system-site-packages so PyQt6 (from apt) stays accessible,
+#   then install remaining pip packages safely inside the venv.
 if [[ -z "$PYTHON_BIN" ]]; then
     for _candidate in python3.12 python3.11 python3.10 python3; do
         _full=$(command -v "$_candidate" 2>/dev/null || true)
         if [[ -n "$_full" ]] && "$_full" -c "import PyQt6" 2>/dev/null; then
-            PYTHON_BIN="$_full"
-            info "Found PyQt6 in system Python: $PYTHON_BIN"
+            info "Found PyQt6 in system Python: $_full — creating venv with --system-site-packages"
+            mkdir -p "$INSTALL_DIR"
+            "$_full" -m venv --system-site-packages "$VENV_DIR"
+            PYTHON_BIN="$VENV_DIR/bin/python"
+            USING_VENV=true
             break
         fi
     done
 fi
 
-# Priority 4: create a venv inside INSTALL_DIR and install everything there
+# Priority 4: no PyQt6 anywhere — create a plain venv and install everything
 if [[ -z "$PYTHON_BIN" ]]; then
     info "No existing Python with PyQt6 found — creating virtual environment…"
 
-    # Find the best available python3
     BASE_PY=""
     for _candidate in python3.12 python3.11 python3.10 python3; do
         BASE_PY=$(command -v "$_candidate" 2>/dev/null || true)
@@ -184,14 +188,8 @@ success "Python: $PYTHON_BIN"
 
 # ── Step 3 — Install Python packages ──────────────────────────────────────────
 info "Installing Python packages…"
-if $USING_VENV; then
-    # Fresh venv — install everything
-    "$PYTHON_BIN" -m pip install --quiet --upgrade pip
-    "$PYTHON_BIN" -m pip install --quiet -r "$SCRIPT_DIR/requirements.txt"
-else
-    # Existing env — only install what's missing
-    "$PYTHON_BIN" -m pip install --quiet -r "$SCRIPT_DIR/requirements.txt"
-fi
+"$PYTHON_BIN" -m pip install --quiet --upgrade pip
+"$PYTHON_BIN" -m pip install --quiet -r "$SCRIPT_DIR/requirements.txt"
 success "Python packages ready"
 
 # ── Step 3 — Copy app to permanent install directory ──────────────────────────
