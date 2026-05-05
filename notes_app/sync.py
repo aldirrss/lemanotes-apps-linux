@@ -353,6 +353,7 @@ class SyncManager:
                 "created_at": note.get("created_at", now),
                 "updated_at": note.get("updated_at", now),
                 "is_deleted": False,
+                "trashed_at": note.get("trashed_at"),
             }, on_conflict="user_id,notebook,section,slug").execute()
         except Exception as e:
             print(f"[Sync] push_note error: {e}")
@@ -371,6 +372,71 @@ class SyncManager:
              .execute())
         except Exception as e:
             print(f"[Sync] delete_note error: {e}")
+
+    def trash_note_remote(self, notebook: str, slug: str,
+                          section: str | None = None, trashed_at: str = "") -> None:
+        """Mark a note as trashed in Supabase (sets trashed_at)."""
+        if not self.is_logged_in():
+            return
+        try:
+            from datetime import datetime, timezone
+            uid = self._client.auth.get_user().user.id
+            ts = trashed_at or datetime.now(timezone.utc).isoformat()
+            (self._client.table("notes")
+             .update({"trashed_at": ts})
+             .eq("user_id", uid)
+             .eq("notebook", notebook)
+             .eq("section", section or "")
+             .eq("slug", slug)
+             .execute())
+        except Exception as e:
+            print(f"[Sync] trash_note error: {e}")
+
+    def restore_note_remote(self, notebook: str, slug: str,
+                            section: str | None = None) -> None:
+        """Clear trashed_at in Supabase to restore a note."""
+        if not self.is_logged_in():
+            return
+        try:
+            uid = self._client.auth.get_user().user.id
+            (self._client.table("notes")
+             .update({"trashed_at": None})
+             .eq("user_id", uid)
+             .eq("notebook", notebook)
+             .eq("section", section or "")
+             .eq("slug", slug)
+             .execute())
+        except Exception as e:
+            print(f"[Sync] restore_note error: {e}")
+
+    def delete_section_remote(self, notebook: str, section: str) -> None:
+        """Mark all notes in a section as permanently deleted in Supabase."""
+        if not self.is_logged_in():
+            return
+        try:
+            uid = self._client.auth.get_user().user.id
+            (self._client.table("notes")
+             .update({"is_deleted": True})
+             .eq("user_id", uid)
+             .eq("notebook", notebook)
+             .eq("section", section)
+             .execute())
+        except Exception as e:
+            print(f"[Sync] delete_section error: {e}")
+
+    def delete_notebook_remote(self, notebook: str) -> None:
+        """Mark all notes in a notebook as permanently deleted in Supabase."""
+        if not self.is_logged_in():
+            return
+        try:
+            uid = self._client.auth.get_user().user.id
+            (self._client.table("notes")
+             .update({"is_deleted": True})
+             .eq("user_id", uid)
+             .eq("notebook", notebook)
+             .execute())
+        except Exception as e:
+            print(f"[Sync] delete_notebook error: {e}")
 
     def pull_all(self) -> tuple[int, str]:
         """Pull cloud notes newer than local.
@@ -403,6 +469,18 @@ class SyncManager:
                 remote_ts = row.get("updated_at", "")
                 local_ts  = existing.get("updated_at", "") if existing else ""
 
+                remote_trashed = row.get("trashed_at")
+
+                # If remote marks note as trashed and local copy is active, trash it locally
+                if remote_trashed and existing and not existing.get("trashed_at"):
+                    storage.trash_note(nb, slug, sec)
+                    count += 1
+                    continue
+
+                # Skip notes that are trashed on remote (don't recreate them locally)
+                if remote_trashed:
+                    continue
+
                 if not existing or remote_ts > local_ts:
                     base = storage._base_path(nb, sec)
                     base.mkdir(parents=True, exist_ok=True)
@@ -426,15 +504,15 @@ class SyncManager:
             return 0, str(e)
 
     def push_all(self) -> str:
-        """Push all local notes to cloud. Returns error string or empty string."""
+        """Push all local notes (active + trashed) to cloud. Returns error string or empty."""
         if not self.is_logged_in():
             return "Not logged in"
         try:
-            for nb in storage.list_notebooks():
-                for note in storage.list_notes(nb):
+            for nb in storage._all_notebook_dirs():
+                for note in storage.list_notes(nb, include_trashed=True):
                     self.push_note(nb, note["slug"])
-                for sec in storage.list_sections(nb):
-                    for note in storage.list_notes(nb, sec):
+                for sec in storage._all_section_dirs(nb):
+                    for note in storage.list_notes(nb, sec, include_trashed=True):
                         self.push_note(nb, note["slug"], sec)
             return ""
         except Exception as e:

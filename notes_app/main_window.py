@@ -68,6 +68,7 @@ class MainWindow(QMainWindow):
         self._apply_theme(self._theme_name)
         self.editor_panel.set_font_size(self._font_size)
         self.sidebar.refresh_tags()
+        threading.Thread(target=self._startup_cleanup, daemon=True).start()
 
     def _build_ui(self):
         central = QWidget()
@@ -87,6 +88,9 @@ class MainWindow(QMainWindow):
         self.sidebar.pinned_all_requested.connect(self._on_pinned_all_requested)
         self.sidebar.pinned_all_cleared.connect(self._on_pinned_all_cleared)
         self.sidebar.notebook_sort_changed.connect(self._on_notebook_sort_changed)
+        self.sidebar.trash_requested.connect(self._on_trash_requested)
+        self.sidebar.section_trash_requested.connect(self._on_section_trash)
+        self.sidebar.notebook_trash_requested.connect(self._on_notebook_trash)
         main_layout.addWidget(self.sidebar)
 
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -95,8 +99,10 @@ class MainWindow(QMainWindow):
         self.note_list = NoteListPanel()
         self.note_list.note_selected.connect(self._on_note_selected)
         self.note_list.new_note_requested.connect(self._create_note)
-        self.note_list.delete_note_requested.connect(self._delete_note)
+        self.note_list.delete_note_requested.connect(self._trash_note)
         self.note_list.pin_note_requested.connect(self._on_pin_requested)
+        self.note_list.trash_restore_requested.connect(self._restore_note)
+        self.note_list.trash_purge_requested.connect(self._purge_note)
         self.note_list.priority_changed.connect(self._on_priority_changed)
         self.note_list.rename_note_requested.connect(self._on_rename_note)
         self._splitter.addWidget(self.note_list)
@@ -291,6 +297,8 @@ class MainWindow(QMainWindow):
         self._current_notebook = notebook
         self._current_section = section or None
         self.sidebar.clear_tag_selection()
+        self.sidebar.clear_trash_filter()
+        self.note_list.exit_trash_mode()
         self.note_list.load_notes(notebook, self._current_section)
         self.editor_panel.clear()
 
@@ -354,16 +362,88 @@ class MainWindow(QMainWindow):
                     self.note_list.list_widget.setCurrentRow(i)
                     break
 
-    def _delete_note(self, notebook: str, section: str, slug: str):
-        storage.delete_note(notebook, slug, section or None)
-        self.note_list.load_notes(notebook, section or None)
+    def _trash_note(self, notebook: str, section: str, slug: str):
+        note = storage.load_note(notebook, slug, section or None)
+        trashed_at = None
+        if storage.trash_note(notebook, slug, section or None) and note:
+            trashed_at = storage._load_meta(notebook, slug, section or None).get("trashed_at")
+        self.note_list.refresh()
         self.editor_panel.clear()
-        self.status_bar.showMessage("Note deleted", 2000)
+        self._load_notebooks()
+        self.status_bar.showMessage("Note moved to Trash", 2000)
+        if sync_manager.is_logged_in() and trashed_at:
+            threading.Thread(
+                target=lambda: sync_manager.trash_note_remote(
+                    notebook, slug, section or None, trashed_at),
+                daemon=True,
+            ).start()
+
+    def _restore_note(self, notebook: str, section: str, slug: str):
+        storage.restore_note(notebook, slug, section or None)
+        self.note_list.load_trash()
+        self._load_notebooks()
+        self.status_bar.showMessage("Note restored", 2000)
+        if sync_manager.is_logged_in():
+            threading.Thread(
+                target=lambda: sync_manager.restore_note_remote(notebook, slug, section or None),
+                daemon=True,
+            ).start()
+
+    def _purge_note(self, notebook: str, section: str, slug: str):
+        storage.purge_note(notebook, slug, section or None)
+        self.note_list.load_trash()
+        self.status_bar.showMessage("Note permanently deleted", 2000)
         if sync_manager.is_logged_in():
             threading.Thread(
                 target=lambda: sync_manager.delete_note_remote(notebook, slug, section or None),
                 daemon=True,
             ).start()
+
+    def _on_trash_requested(self):
+        self.note_list.load_trash()
+        self.editor_panel.clear()
+
+    def _on_section_trash(self, notebook: str, section: str):
+        trashed = storage.trash_section(notebook, section)
+        self.note_list.refresh()
+        self.editor_panel.clear()
+        self._load_notebooks()
+        self.status_bar.showMessage(
+            f"{len(trashed)} note(s) moved to Trash", 2000
+        )
+        if sync_manager.is_logged_in():
+            for note in trashed:
+                ta = storage._load_meta(notebook, note["slug"], section).get("trashed_at", "")
+                slug = note["slug"]
+                threading.Thread(
+                    target=lambda nb=notebook, sl=slug, sec=section, t=ta:
+                        sync_manager.trash_note_remote(nb, sl, sec, t),
+                    daemon=True,
+                ).start()
+
+    def _on_notebook_trash(self, notebook: str):
+        trashed = storage.trash_notebook(notebook)
+        self.note_list.refresh()
+        self.editor_panel.clear()
+        self._load_notebooks()
+        self.status_bar.showMessage(
+            f"{len(trashed)} note(s) moved to Trash", 2000
+        )
+        if sync_manager.is_logged_in():
+            for note in trashed:
+                sec = note.get("section")
+                ta = storage._load_meta(notebook, note["slug"], sec).get("trashed_at", "")
+                slug = note["slug"]
+                threading.Thread(
+                    target=lambda nb=notebook, sl=slug, s=sec, t=ta:
+                        sync_manager.trash_note_remote(nb, sl, s, t),
+                    daemon=True,
+                ).start()
+
+    def _startup_cleanup(self):
+        count = storage.cleanup_expired_trash()
+        if count:
+            print(f"[Startup] Purged {count} expired trash note(s)")
 
     def _on_tag_selected(self, tag: str):
         self.note_list.filter_by_tag(tag)
@@ -446,6 +526,7 @@ class MainWindow(QMainWindow):
         self.note_list.refresh()
 
     def _on_pinned_all_requested(self):
+        self.note_list.exit_trash_mode()
         self.note_list.filter_pinned_all()
         self.editor_panel.clear()
 

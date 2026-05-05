@@ -13,7 +13,7 @@ Structure:
 import json
 import re
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 
@@ -61,12 +61,39 @@ def _save_meta(notebook: str, slug: str, meta: dict, section: str | None = None)
 
 # ─── Notebooks ────────────────────────────────────────────────────────────────
 
+def _has_active_note_in_dir(path: Path) -> bool:
+    """Return True if `path` contains at least one .md with no trashed_at."""
+    for md in path.glob("*.md"):
+        meta_p = md.with_suffix(".meta.json")
+        try:
+            if meta_p.exists() and json.loads(meta_p.read_text()).get("trashed_at"):
+                continue
+        except Exception:
+            pass
+        return True
+    return False
+
+
 def list_notebooks() -> list[str]:
     ensure_root()
-    return sorted(
-        d.name for d in NOTES_ROOT.iterdir()
-        if d.is_dir() and not d.name.startswith(".")
-    )
+    result = []
+    for d in NOTES_ROOT.iterdir():
+        if not d.is_dir() or d.name.startswith("."):
+            continue
+        all_mds = list(d.rglob("*.md"))
+        if not all_mds:
+            result.append(d.name)
+            continue
+        # Include only if at least one non-trashed note exists anywhere inside
+        if _has_active_note_in_dir(d):
+            result.append(d.name)
+            continue
+        for sub in d.iterdir():
+            if sub.is_dir() and not sub.name.startswith("."):
+                if _has_active_note_in_dir(sub):
+                    result.append(d.name)
+                    break
+    return sorted(result)
 
 
 def create_notebook(name: str) -> bool:
@@ -100,10 +127,15 @@ def list_sections(notebook: str) -> list[str]:
     nb_path = NOTES_ROOT / notebook
     if not nb_path.exists():
         return []
-    return sorted(
-        d.name for d in nb_path.iterdir()
-        if d.is_dir() and not d.name.startswith(".")
-    )
+    result = []
+    for d in nb_path.iterdir():
+        if not d.is_dir() or d.name.startswith("."):
+            continue
+        all_mds = list(d.glob("*.md"))
+        # Empty section — keep it visible
+        if not all_mds or _has_active_note_in_dir(d):
+            result.append(d.name)
+    return sorted(result)
 
 
 def create_section(notebook: str, name: str) -> bool:
@@ -133,7 +165,8 @@ def delete_section(notebook: str, section: str) -> bool:
 
 # ─── Notes ────────────────────────────────────────────────────────────────────
 
-def list_notes(notebook: str, section: str | None = None) -> list[dict]:
+def list_notes(notebook: str, section: str | None = None,
+               include_trashed: bool = False) -> list[dict]:
     base = _base_path(notebook, section)
     if not base.exists():
         return []
@@ -141,6 +174,8 @@ def list_notes(notebook: str, section: str | None = None) -> list[dict]:
     for md_file in sorted(base.glob("*.md")):
         slug = md_file.stem
         meta = _load_meta(notebook, slug, section)
+        if not include_trashed and meta.get("trashed_at"):
+            continue
         notes.append({
             "slug":       slug,
             "notebook":   notebook,
@@ -151,6 +186,7 @@ def list_notes(notebook: str, section: str | None = None) -> list[dict]:
             "updated_at": meta.get("updated_at", ""),
             "pinned":     meta.get("pinned", False),
             "priority":   meta.get("priority", 0),
+            "trashed_at": meta.get("trashed_at"),
         })
     return sorted(notes, key=lambda n: n["updated_at"], reverse=True)
 
@@ -253,6 +289,108 @@ def delete_note(notebook: str, slug: str,
     if mp.exists():
         mp.unlink()
     return True
+
+
+# ─── Trash ────────────────────────────────────────────────────────────────────
+
+TRASH_TTL_DAYS = 7
+
+
+def trash_note(notebook: str, slug: str, section: str | None = None) -> bool:
+    """Soft-delete: mark note with trashed_at timestamp."""
+    meta = _load_meta(notebook, slug, section)
+    if not meta and not _md_path(notebook, slug, section).exists():
+        return False
+    meta["trashed_at"] = datetime.now(timezone.utc).isoformat()
+    _save_meta(notebook, slug, meta, section)
+    return True
+
+
+def restore_note(notebook: str, slug: str, section: str | None = None) -> bool:
+    """Remove trashed_at to bring a note back from trash."""
+    meta = _load_meta(notebook, slug, section)
+    if "trashed_at" not in meta:
+        return False
+    meta.pop("trashed_at")
+    _save_meta(notebook, slug, meta, section)
+    return True
+
+
+def purge_note(notebook: str, slug: str, section: str | None = None) -> bool:
+    """Permanently delete a note's files from disk."""
+    md = _md_path(notebook, slug, section)
+    mt = _meta_path(notebook, slug, section)
+    if not md.exists():
+        return False
+    md.unlink()
+    if mt.exists():
+        mt.unlink()
+    return True
+
+
+def list_trash() -> list[dict]:
+    """Return all notes that have a trashed_at timestamp, newest-trashed first."""
+    result = []
+    for nb in _all_notebook_dirs():
+        for note in list_notes(nb, include_trashed=True):
+            if note.get("trashed_at"):
+                result.append(note)
+        for sec in _all_section_dirs(nb):
+            for note in list_notes(nb, sec, include_trashed=True):
+                if note.get("trashed_at"):
+                    result.append(note)
+    return sorted(result, key=lambda n: n.get("trashed_at", ""), reverse=True)
+
+
+def cleanup_expired_trash(days: int = TRASH_TTL_DAYS) -> int:
+    """Permanently purge notes trashed more than `days` ago. Returns count."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    count = 0
+    for note in list_trash():
+        try:
+            ts = datetime.fromisoformat(note["trashed_at"])
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            if ts < cutoff:
+                purge_note(note["notebook"], note["slug"], note.get("section"))
+                count += 1
+        except Exception:
+            pass
+    return count
+
+
+def trash_section(notebook: str, section: str) -> list[dict]:
+    """Trash all notes in a section. Returns list of trashed note dicts."""
+    trashed = []
+    for note in list_notes(notebook, section):
+        if trash_note(notebook, note["slug"], section):
+            trashed.append(note)
+    return trashed
+
+
+def trash_notebook(notebook: str) -> list[dict]:
+    """Trash all notes in a notebook (root + all sections). Returns list of trashed note dicts."""
+    trashed = []
+    for note in list_notes(notebook):
+        if trash_note(notebook, note["slug"]):
+            trashed.append(note)
+    for sec in _all_section_dirs(notebook):
+        trashed.extend(trash_section(notebook, sec))
+    return trashed
+
+
+def _all_notebook_dirs() -> list[str]:
+    ensure_root()
+    return sorted(d.name for d in NOTES_ROOT.iterdir()
+                  if d.is_dir() and not d.name.startswith("."))
+
+
+def _all_section_dirs(notebook: str) -> list[str]:
+    nb_path = NOTES_ROOT / notebook
+    if not nb_path.exists():
+        return []
+    return sorted(d.name for d in nb_path.iterdir()
+                  if d.is_dir() and not d.name.startswith("."))
 
 
 # ─── Pin & Priority ───────────────────────────────────────────────────────────

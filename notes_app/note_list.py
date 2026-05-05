@@ -7,7 +7,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize
 
 from notes_app.themes import THEMES
 from notes_app.widgets import NoteListWidget, TagPill
-from notes_app.dialogs import PromptDialog
+from notes_app.dialogs import PromptDialog, TrashNoteDialog
 from notes_app import storage
 from notes_app.settings import load_settings, save_settings
 
@@ -30,6 +30,8 @@ class NoteListPanel(QWidget):
     pin_note_requested = pyqtSignal(str, str, str)           # (nb, section, slug)
     priority_changed = pyqtSignal(str, str, str, int)        # (nb, section, slug, priority)
     rename_note_requested = pyqtSignal(str, str, str, str)   # (nb, section, slug, new_title)
+    trash_restore_requested = pyqtSignal(str, str, str)      # (nb, section, slug)
+    trash_purge_requested = pyqtSignal(str, str, str)        # (nb, section, slug)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -118,6 +120,7 @@ class NoteListPanel(QWidget):
         self._notes = []
         self._tag_filter: str | None = None
         self._current_section: str | None = None
+        self._trash_mode = False
         self._apply_styles()
 
     def _apply_styles(self):
@@ -218,6 +221,21 @@ class NoteListPanel(QWidget):
             for sec in storage.list_sections(nb):
                 all_notes += [n for n in storage.list_notes(nb, sec) if n.get("pinned")]
         self._render_notes(self._apply_sort_filter(all_notes))
+
+    def load_trash(self):
+        self._trash_mode = True
+        self._tag_filter = None
+        self._current_notebook = None
+        self._current_section = None
+        self.nb_label.setText("\U0001f5d1  Trash")
+        self._new_btn.setEnabled(False)
+        notes = storage.list_trash()
+        self._notes = notes
+        self._render_notes(notes)
+
+    def exit_trash_mode(self):
+        self._trash_mode = False
+        self._new_btn.setEnabled(True)
 
     def clear_tag_filter(self):
         self._tag_filter = None
@@ -351,11 +369,23 @@ class NoteListPanel(QWidget):
         return outer
 
     def _on_select(self, row):
-        if row >= 0:
-            item = self.list_widget.item(row)
-            if item:
-                nb, section, slug = item.data(Qt.ItemDataRole.UserRole)
-                self.note_selected.emit(nb, section, slug)
+        if row < 0:
+            return
+        item = self.list_widget.item(row)
+        if not item:
+            return
+        nb, section, slug = item.data(Qt.ItemDataRole.UserRole)
+        if self._trash_mode:
+            note = storage.load_note(nb, slug, section or None)
+            if note:
+                dlg = TrashNoteDialog(note, self._theme, self)
+                result = dlg.exec()
+                if result == TrashNoteDialog.Accepted:
+                    self.trash_restore_requested.emit(nb, section, slug)
+                elif result == TrashNoteDialog.PURGE_CODE:
+                    self.trash_purge_requested.emit(nb, section, slug)
+            return
+        self.note_selected.emit(nb, section, slug)
 
     def _on_search(self, query: str):
         if not query.strip():
@@ -400,8 +430,6 @@ class NoteListPanel(QWidget):
             return
         nb, section, slug = item.data(Qt.ItemDataRole.UserRole)
         extra = item.data(Qt.ItemDataRole.UserRole + 1) or {}
-        is_pinned  = extra.get("pinned", False)
-        priority   = extra.get("priority", 0)
         t = self._theme
         menu_ss = f"""
             QMenu {{ background: {t['bg3']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: 8px; padding: 4px; }}
@@ -411,6 +439,23 @@ class NoteListPanel(QWidget):
         """
         menu = QMenu(self)
         menu.setStyleSheet(menu_ss)
+
+        if self._trash_mode:
+            restore_act = menu.addAction("\u2756  Restore")
+            purge_act   = menu.addAction("\U0001f5d1  Delete Permanently")
+            act = menu.exec(self.list_widget.mapToGlobal(pos))
+            if act == restore_act:
+                self.trash_restore_requested.emit(nb, section, slug)
+            elif act == purge_act:
+                if QMessageBox.question(
+                    self, "Delete Permanently",
+                    "Permanently delete this note? This cannot be undone."
+                ) == QMessageBox.StandardButton.Yes:
+                    self.trash_purge_requested.emit(nb, section, slug)
+            return
+
+        is_pinned = extra.get("pinned", False)
+        priority  = extra.get("priority", 0)
         pin_act    = menu.addAction("\U0001f4cc  Unpin" if is_pinned else "\U0001f4cc  Pin")
         rename_act = menu.addAction("\u270f\ufe0f  Rename")
         prio_menu  = menu.addMenu("  Priority")
@@ -420,7 +465,7 @@ class NoteListPanel(QWidget):
             a = prio_menu.addAction(("\u2713 " if lvl == priority else "   ") + lbl)
             prio_acts[a] = lvl
         menu.addSeparator()
-        del_act = menu.addAction("\U0001f5d1  Delete Note")
+        del_act = menu.addAction("\U0001f5d1  Move to Trash")
 
         act = menu.exec(self.list_widget.mapToGlobal(pos))
         if act == pin_act:
@@ -437,5 +482,4 @@ class NoteListPanel(QWidget):
         elif act in prio_acts:
             self.priority_changed.emit(nb, section, slug, prio_acts[act])
         elif act == del_act:
-            if QMessageBox.question(self, "Delete", "Delete this note?") == QMessageBox.StandardButton.Yes:
-                self.delete_note_requested.emit(nb, section, slug)
+            self.delete_note_requested.emit(nb, section, slug)

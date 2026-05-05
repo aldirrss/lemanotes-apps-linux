@@ -1,11 +1,12 @@
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QDialogButtonBox, QLineEdit, QSpinBox, QComboBox,
+    QDialogButtonBox, QLineEdit, QSpinBox, QComboBox, QFrame,
     QPushButton, QLabel, QTabWidget, QTreeWidget, QTreeWidgetItem,
     QHeaderView, QMessageBox, QGraphicsDropShadowEffect,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QByteArray, QSize
 from PyQt6.QtGui import QColor, QPixmap, QIcon
+from datetime import datetime, timezone, timedelta
 
 from notes_app.themes import THEMES
 from notes_app.shortcuts import SHORTCUTS, _MANDATORY_SHORTCUTS
@@ -792,3 +793,132 @@ class LoginDialog(QDialog):
 
     def values(self) -> tuple[str, str]:
         return self.email_input.text().strip(), self.pass_input.text()
+
+
+class TrashNoteDialog(QDialog):
+    """
+    Dialog shown when opening a trashed note.
+    Result codes: Accepted = restore, 2 = purge now, Rejected = close.
+    """
+
+    PURGE_CODE = 2
+
+    def __init__(self, note: dict, theme: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        t = theme
+
+        trashed_at_str = note.get("trashed_at", "")
+        remaining_days, remaining_hours = self._compute_remaining(trashed_at_str)
+
+        outer = QWidget(self)
+        outer.setObjectName("outer")
+        outer.setStyleSheet(f"""
+            QWidget#outer {{
+                background: {t['bg3']}; border-radius: 12px;
+                border: 1px solid {t['border']};
+            }}
+        """)
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(24)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(0, 0, 0, 100))
+        outer.setGraphicsEffect(shadow)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(outer)
+
+        vl = QVBoxLayout(outer)
+        vl.setContentsMargins(28, 24, 28, 20)
+        vl.setSpacing(12)
+
+        icon_lbl = QLabel("🗑")
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setStyleSheet("font-size: 36px; background: transparent;")
+        vl.addWidget(icon_lbl)
+
+        title = QLabel(note.get("title", "Untitled"))
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setWordWrap(True)
+        title.setStyleSheet(
+            f"color: {t['text2']}; font-size: 15px; font-weight: 700; background: transparent;"
+        )
+        vl.addWidget(title)
+
+        if remaining_days < 0:
+            countdown_text = "Scheduled for permanent deletion"
+        elif remaining_days == 0:
+            countdown_text = f"Permanent deletion in {remaining_hours}h"
+        else:
+            countdown_text = f"Permanent deletion in {remaining_days}d {remaining_hours}h"
+
+        countdown = QLabel(countdown_text)
+        countdown.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        countdown.setStyleSheet(
+            f"color: {t.get('priority_high', '#E84040')}; font-size: 12px; background: transparent;"
+        )
+        vl.addWidget(countdown)
+
+        note_loc = note.get("section") or note.get("notebook", "")
+        if note_loc:
+            loc_lbl = QLabel(f"📁 {note.get('notebook', '')} / {note_loc}"
+                             if note.get("section") else f"📁 {note_loc}")
+            loc_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            loc_lbl.setStyleSheet(
+                f"color: {t['muted2']}; font-size: 11px; background: transparent;"
+            )
+            vl.addWidget(loc_lbl)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet(f"background: {t['border']}; max-height: 1px;")
+        vl.addWidget(sep)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        close_btn = QPushButton("Close")
+        close_btn.setStyleSheet(self._btn_style(t))
+        close_btn.clicked.connect(self.reject)
+        btn_row.addWidget(close_btn)
+
+        restore_btn = QPushButton("✦ Restore")
+        restore_btn.setStyleSheet(self._btn_style(t, primary=True))
+        restore_btn.clicked.connect(self.accept)
+        btn_row.addWidget(restore_btn)
+
+        purge_btn = QPushButton("Delete Now")
+        purge_btn.setStyleSheet(self._btn_style(t, danger=True))
+        purge_btn.clicked.connect(lambda: self.done(self.PURGE_CODE))
+        btn_row.addWidget(purge_btn)
+
+        vl.addLayout(btn_row)
+        self.setFixedWidth(340)
+
+    @staticmethod
+    def _compute_remaining(trashed_at_str: str) -> tuple[int, int]:
+        try:
+            ts = datetime.fromisoformat(trashed_at_str)
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            expire = ts + timedelta(days=7)
+            delta = expire - datetime.now(timezone.utc)
+            if delta.total_seconds() <= 0:
+                return -1, 0
+            return delta.days, delta.seconds // 3600
+        except Exception:
+            return 6, 0
+
+    @staticmethod
+    def _btn_style(t: dict, primary: bool = False, danger: bool = False) -> str:
+        if danger:
+            bg, fg, hover = t.get("priority_high", "#E84040"), "#fff", "#c0392b"
+        elif primary:
+            bg, fg, hover = t["accent"], t["accent_fg"], t.get("accent_hover", t["accent"])
+        else:
+            bg, fg, hover = t["item_sel"], t["muted"], t["border"]
+        return (f"QPushButton {{ background: {bg}; color: {fg}; border: 1px solid {t['border']}; "
+                f"border-radius: 4px; padding: 5px 12px; font-size: 12px; }}"
+                f"QPushButton:hover {{ background: {hover}; }}")

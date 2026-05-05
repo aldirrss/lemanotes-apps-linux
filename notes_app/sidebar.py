@@ -22,6 +22,9 @@ class SidebarPanel(QWidget):
     notebook_sort_changed = pyqtSignal(str)   # sort mode
     pinned_all_requested = pyqtSignal()
     pinned_all_cleared = pyqtSignal()
+    trash_requested = pyqtSignal()
+    section_trash_requested = pyqtSignal(str, str)    # (notebook, section)
+    notebook_trash_requested = pyqtSignal(str)        # notebook
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -59,6 +62,7 @@ class SidebarPanel(QWidget):
         layout.addWidget(self._header)
 
         self._active_pinned_filter = False
+        self._active_trash_filter = False
 
         self._sep = QFrame()
         self._sep.setFrameShape(QFrame.Shape.HLine)
@@ -237,6 +241,14 @@ class SidebarPanel(QWidget):
         self._tags_layout.addWidget(pin_btn)
         self._pin_filter_btn_ref = pin_btn
 
+        trash_btn = QPushButton("  \U0001f5d1 Trash")
+        trash_btn.setCheckable(True)
+        trash_btn.setChecked(self._active_trash_filter)
+        trash_btn.setStyleSheet(self._tag_btn_style(t, trash=True))
+        trash_btn.clicked.connect(self._on_trash_filter_clicked)
+        self._tags_layout.addWidget(trash_btn)
+        self._trash_filter_btn_ref = trash_btn
+
         all_tags = storage.get_all_tags()
         if not all_tags:
             no_tags_lbl = QLabel("No tags yet")
@@ -275,8 +287,9 @@ class SidebarPanel(QWidget):
             self._tag_buttons[tag] = btn
         self._tags_layout.addStretch()
 
-    def _tag_btn_style(self, t: dict, special: bool = False) -> str:
-        fg = t["accent"] if not special else "#FFD700"
+    def _tag_btn_style(self, t: dict, special: bool = False, trash: bool = False) -> str:
+        fg = (t["accent"] if not special and not trash
+              else ("#FFD700" if special else t.get("priority_high", "#E84040")))
         return f"""
             QPushButton {{
                 background: {t['code_bg']}; color: {fg};
@@ -294,9 +307,26 @@ class SidebarPanel(QWidget):
         self._active_pinned_filter = not self._active_pinned_filter
         if self._active_pinned_filter:
             self.clear_tag_selection()
+            self.clear_trash_filter()
             self.pinned_all_requested.emit()
         else:
             self.pinned_all_cleared.emit()
+
+    def _on_trash_filter_clicked(self):
+        self._active_trash_filter = not self._active_trash_filter
+        if self._active_trash_filter:
+            self.clear_tag_selection()
+            self.clear_pinned_filter()
+            self.trash_requested.emit()
+        else:
+            if hasattr(self, "_trash_filter_btn_ref"):
+                self._trash_filter_btn_ref.setChecked(False)
+            self._active_trash_filter = False
+
+    def clear_trash_filter(self):
+        self._active_trash_filter = False
+        if hasattr(self, "_trash_filter_btn_ref"):
+            self._trash_filter_btn_ref.setChecked(False)
 
     def clear_tag_selection(self):
         if self._active_tag and self._active_tag in self._tag_buttons:
@@ -397,9 +427,10 @@ class SidebarPanel(QWidget):
                             child.setData(0, Qt.ItemDataRole.UserRole, (new_name.strip(), child_sec))
             elif act == delete_act:
                 if QMessageBox.question(
-                    self, "Delete", f"Delete notebook '{nb}' and all its notes?"
+                    self, "Move to Trash",
+                    f"Move all notes in '{nb}' to Trash?\nThey will be deleted permanently after 7 days."
                 ) == QMessageBox.StandardButton.Yes:
-                    storage.delete_notebook(nb)
+                    self.notebook_trash_requested.emit(nb)
                     idx = self._tree.indexOfTopLevelItem(item)
                     self._tree.takeTopLevelItem(idx)
         else:
@@ -417,10 +448,13 @@ class SidebarPanel(QWidget):
                         item.setData(0, Qt.ItemDataRole.UserRole, (nb, new_name.strip()))
             elif act == delete_act:
                 has_notes = bool(storage.list_notes(nb, sec))
-                msg = (f"Delete section '{sec}' and all its notes?" if has_notes
-                       else f"Delete section '{sec}'?")
-                if QMessageBox.question(self, "Delete", msg) == QMessageBox.StandardButton.Yes:
-                    storage.delete_section(nb, sec)
+                msg = (f"Move all notes in section '{sec}' to Trash?\nThey will be deleted permanently after 7 days."
+                       if has_notes else f"Delete empty section '{sec}'?")
+                if QMessageBox.question(self, "Move to Trash", msg) == QMessageBox.StandardButton.Yes:
+                    if has_notes:
+                        self.section_trash_requested.emit(nb, sec)
+                    else:
+                        storage.delete_section(nb, sec)
                     parent = item.parent()
                     if parent:
                         parent.removeChild(item)
