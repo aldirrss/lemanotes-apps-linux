@@ -904,11 +904,13 @@
       var level = m[1].length;
       var text = m[2].trim();
       var anchor = _headingToAnchor(text);
-      var indent = '  '.repeat(Math.max(0, level - 1));
-      tocLines.push(indent + '- [' + text + '](#' + anchor + ')');
+      // Non-breaking spaces for visual indentation (2 per sub-level, no bullet)
+      var indent = '  '.repeat(Math.max(0, level - 1) * 2);
+      tocLines.push(indent + '[' + text + '](#' + anchor + ')');
     });
     if (tocLines.length === 0) return;
-    var toc = '## Daftar Isi\n\n' + tocLines.join('\n') + '\n\n---\n\n';
+    // Two trailing spaces = markdown line break (no list bullets)
+    var toc = '## Daftar Isi\n\n' + tocLines.join('  \n') + '\n\n---\n\n';
     editor.setMarkdown(toc + md);
   }
 
