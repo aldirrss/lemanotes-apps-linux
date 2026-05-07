@@ -897,20 +897,47 @@
     if (!editor) return;
     var md = editor.getMarkdown();
     var lines = md.split('\n');
-    var tocLines = [];
+    var tocItems = [];
     lines.forEach(function(line) {
       var m = line.match(/^(#{1,6})\s+(.+)$/);
       if (!m) return;
-      var level = m[1].length;
-      var text = m[2].trim();
-      var anchor = _headingToAnchor(text);
-      // Non-breaking spaces for visual indentation (2 per sub-level, no bullet)
-      var indent = '  '.repeat(Math.max(0, level - 1) * 2);
-      tocLines.push(indent + '[' + text + '](#' + anchor + ')');
+      tocItems.push({level: m[1].length, text: m[2].trim(), anchor: _headingToAnchor(m[2].trim())});
     });
-    if (tocLines.length === 0) return;
-    // Two trailing spaces = markdown line break (no list bullets)
-    var toc = '## Table of Contents\n\n' + tocLines.join('  \n') + '\n\n---\n\n';
+    if (tocItems.length === 0) return;
+
+    // Use ProseMirror directly so hard_break nodes create real line breaks
+    // (setMarkdown collapses trailing-space soft breaks into a single inline flow)
+    var pm = _getPM();
+    if (pm) {
+      try {
+        var schema = pm.state.schema;
+        var paraNodes = [];
+        tocItems.forEach(function(item, idx) {
+          if (idx > 0) paraNodes.push(schema.nodes.hard_break.create());
+          var prefix = '\u00a0'.repeat(Math.max(0, item.level - 1) * 4);
+          var linkMark = schema.marks.link.create({href: '#' + item.anchor, title: ''});
+          paraNodes.push(schema.text(prefix + item.text, [linkMark]));
+        });
+        var tocDoc = [];
+        tocDoc.push(schema.nodes.heading.create({level: 2}, [schema.text('Daftar Isi')]));
+        tocDoc.push(schema.nodes.paragraph.create(null, paraNodes));
+        var hrTypes = ['thematic_break', 'horizontal_rule', 'hr'];
+        for (var hi = 0; hi < hrTypes.length; hi++) {
+          if (schema.nodes[hrTypes[hi]]) { tocDoc.push(schema.nodes[hrTypes[hi]].create()); break; }
+        }
+        var tr = pm.state.tr;
+        tocDoc.reverse().forEach(function(n) { tr = tr.insert(0, n); });
+        pm.dispatch(tr);
+        return;
+      } catch (err) {}
+    }
+    // Fallback: separate paragraphs via setMarkdown
+    var toc = '## Daftar Isi\n\n';
+    tocItems.forEach(function(item) {
+      var prefix = '\u00a0'.repeat(Math.max(0, item.level - 1) * 4);
+      toc += prefix + '[' + item.text + '](#' + item.anchor + ')\n\n';
+    });
+    toc += '---\n\n';
     editor.setMarkdown(toc + md);
   }
 
