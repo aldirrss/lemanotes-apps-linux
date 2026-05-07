@@ -74,9 +74,10 @@ class SyncManager:
     def __init__(self):
         self._client = None
         self._ready = False
-        self._env_locked = False   # True when config comes from .env
-        self._optimistic_logged_in = False  # True while background refresh is pending
-        self._on_session_refresh: "callable | None" = None  # UI callback after refresh
+        self._env_locked = False
+        self._optimistic_logged_in = False
+        self._on_session_refresh: "callable | None" = None
+        self._stored_refresh_token: "str | None" = None  # kept for network-error retry
         self._load_config()
 
     # ── Config / init ────────────────────────────────────────────────────────────
@@ -117,6 +118,9 @@ class SyncManager:
             from supabase import create_client
             self._client = create_client(url, key)
             if session_data and session_data.get("refresh_token"):
+                # Keep refresh_token so we can retry if the first background
+                # refresh fails due to a transient network error.
+                self._stored_refresh_token = session_data["refresh_token"]
                 # Mark optimistic so is_logged_in() returns True immediately while
                 # the background refresh is in flight (access_token may be expired).
                 self._optimistic_logged_in = True
@@ -133,20 +137,58 @@ class SyncManager:
             self._ready = False
 
     def _refresh_session_bg(self):
-        """Refresh access token in background. Clears optimistic flag on failure."""
+        """Refresh access token in background.
+
+        Only clears stored session on auth errors (token revoked / invalid).
+        Network/transient errors keep the refresh_token so the next startup
+        can retry — avoids logging the user out just because the network was
+        not yet ready when the app started.
+        """
         try:
             res = self._client.auth.refresh_session()
             if res and res.session:
                 self._save_session(res.session)
-                self._optimistic_logged_in = False  # real session is now active
+                self._optimistic_logged_in = False
             else:
+                # Null response = token definitively rejected
                 self._optimistic_logged_in = False
                 self._clear_stored_session()
-        except Exception:
+        except Exception as exc:
+            exc_name = type(exc).__name__.lower()
+            # AuthApiError / AuthException = token invalid or revoked → must clear
+            is_auth_error = (
+                "auth" in exc_name
+                or "invalid" in str(exc).lower()
+                or "revoked" in str(exc).lower()
+                or "expired" in str(exc).lower()
+            )
             self._optimistic_logged_in = False
-            self._clear_stored_session()
+            if is_auth_error:
+                self._clear_stored_session()
+            # Network/timeout errors: keep refresh_token, retry on next startup
         if self._on_session_refresh:
             self._on_session_refresh()
+
+    def retry_refresh_if_needed(self):
+        """Re-attempt token refresh if the startup refresh failed (network error).
+
+        Call this before any sync operation that requires auth.
+        Runs synchronously — intended for background threads only.
+        """
+        if self.is_logged_in() or not self._client:
+            return
+        if not self._stored_refresh_token:
+            return
+        try:
+            self._client.auth.set_session("", self._stored_refresh_token)
+            res = self._client.auth.refresh_session()
+            if res and res.session:
+                self._save_session(res.session)
+                self._stored_refresh_token = None
+                if self._on_session_refresh:
+                    self._on_session_refresh()
+        except Exception:
+            pass
 
     def _clear_stored_session(self):
         _keyring_clear()
@@ -444,6 +486,7 @@ class SyncManager:
         Returns (count_written, error_message).
         error_message is empty string on success.
         """
+        self.retry_refresh_if_needed()
         if not self.is_logged_in():
             return 0, "Not logged in"
         try:
@@ -505,6 +548,7 @@ class SyncManager:
 
     def push_all(self) -> str:
         """Push all local notes (active + trashed) to cloud. Returns error string or empty."""
+        self.retry_refresh_if_needed()
         if not self.is_logged_in():
             return "Not logged in"
         try:
