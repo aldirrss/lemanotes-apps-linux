@@ -905,39 +905,17 @@
     });
     if (tocItems.length === 0) return;
 
-    // Use ProseMirror directly so hard_break nodes create real line breaks
-    // (setMarkdown collapses trailing-space soft breaks into a single inline flow)
-    var pm = _getPM();
-    if (pm) {
-      try {
-        var schema = pm.state.schema;
-        var paraNodes = [];
-        tocItems.forEach(function(item, idx) {
-          if (idx > 0) paraNodes.push(schema.nodes.hard_break.create());
-          var prefix = '\u00a0'.repeat(Math.max(0, item.level - 1) * 4);
-          var linkMark = schema.marks.link.create({href: '#' + item.anchor, title: ''});
-          paraNodes.push(schema.text(prefix + item.text, [linkMark]));
-        });
-        var tocDoc = [];
-        tocDoc.push(schema.nodes.heading.create({level: 2}, [schema.text('Daftar Isi')]));
-        tocDoc.push(schema.nodes.paragraph.create(null, paraNodes));
-        var hrTypes = ['thematic_break', 'horizontal_rule', 'hr'];
-        for (var hi = 0; hi < hrTypes.length; hi++) {
-          if (schema.nodes[hrTypes[hi]]) { tocDoc.push(schema.nodes[hrTypes[hi]].create()); break; }
-        }
-        var tr = pm.state.tr;
-        tocDoc.reverse().forEach(function(n) { tr = tr.insert(0, n); });
-        pm.dispatch(tr);
-        return;
-      } catch (err) {}
-    }
-    // Fallback: separate paragraphs via setMarkdown
-    var toc = '## Daftar Isi\n\n';
-    tocItems.forEach(function(item) {
-      var prefix = '\u00a0'.repeat(Math.max(0, item.level - 1) * 4);
-      toc += prefix + '[' + item.text + '](#' + item.anchor + ')\n\n';
+    // Relative indentation: start from the shallowest heading in the document
+    var minLevel = tocItems.reduce(function(min, item) {
+      return Math.min(min, item.level);
+    }, 6);
+
+    var tocLines = tocItems.map(function(item) {
+      var indent = '  '.repeat(item.level - minLevel);
+      return indent + '- [' + item.text + '](#' + item.anchor + ')';
     });
-    toc += '---\n\n';
+
+    var toc = '## Table of Content\n\n' + tocLines.join('\n') + '\n\n---\n\n';
     editor.setMarkdown(toc + md);
   }
 

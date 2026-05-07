@@ -76,24 +76,10 @@ def _has_active_note_in_dir(path: Path) -> bool:
 
 def list_notebooks() -> list[str]:
     ensure_root()
-    result = []
-    for d in NOTES_ROOT.iterdir():
-        if not d.is_dir() or d.name.startswith("."):
-            continue
-        all_mds = list(d.rglob("*.md"))
-        if not all_mds:
-            result.append(d.name)
-            continue
-        # Include only if at least one non-trashed note exists anywhere inside
-        if _has_active_note_in_dir(d):
-            result.append(d.name)
-            continue
-        for sub in d.iterdir():
-            if sub.is_dir() and not sub.name.startswith("."):
-                if _has_active_note_in_dir(sub):
-                    result.append(d.name)
-                    break
-    return sorted(result)
+    return sorted(
+        d.name for d in NOTES_ROOT.iterdir()
+        if d.is_dir() and not d.name.startswith(".")
+    )
 
 
 def create_notebook(name: str) -> bool:
@@ -127,15 +113,10 @@ def list_sections(notebook: str) -> list[str]:
     nb_path = NOTES_ROOT / notebook
     if not nb_path.exists():
         return []
-    result = []
-    for d in nb_path.iterdir():
-        if not d.is_dir() or d.name.startswith("."):
-            continue
-        all_mds = list(d.glob("*.md"))
-        # Empty section — keep it visible
-        if not all_mds or _has_active_note_in_dir(d):
-            result.append(d.name)
-    return sorted(result)
+    return sorted(
+        d.name for d in nb_path.iterdir()
+        if d.is_dir() and not d.name.startswith(".")
+    )
 
 
 def create_section(notebook: str, name: str) -> bool:
