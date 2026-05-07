@@ -13,7 +13,7 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage
 from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QUrl, QObject, pyqtSlot, QMarginsF
-from PyQt6.QtGui import QKeySequence, QShortcut, QPageLayout, QPageSize
+from PyQt6.QtGui import QKeySequence, QShortcut, QPageLayout, QPageSize, QDesktopServices
 
 from notes_app.themes import THEMES
 from notes_app.shortcuts import _MANDATORY_SHORTCUTS
@@ -43,6 +43,10 @@ class EditorBridge(QObject):
     @pyqtSlot(str)
     def on_format_change(self, json_str: str):
         self.format_changed.emit(json_str)
+
+    @pyqtSlot(str)
+    def open_url(self, url: str):
+        QDesktopServices.openUrl(QUrl(url))
 
 
 # ─── Editor Panel ─────────────────────────────────────────────────────────────
@@ -196,6 +200,7 @@ class EditorPanel(QWidget):
         _btn("\U0001f5bc",  self._insert_image,      "Insert image (Ctrl+Shift+I)")
         _btn("\U0001f4cb", self._insert_table,      "Insert table")
         _btn("</>",        self._insert_code_block, "Insert code block (Ctrl+Shift+C)")
+        _btn("TOC",        self._insert_toc,         "Insert Table of Contents")
 
         fmtl.addStretch()
         self._fmt_toolbar.setEnabled(False)
@@ -636,6 +641,9 @@ class EditorPanel(QWidget):
             self._wysiwyg.page().runJavaScript(
                 f"insertCodeBlock({json.dumps(dlg.language())})"
             )
+
+    def _insert_toc(self):
+        self._wysiwyg.page().runJavaScript("insertTOC()")
 
     def _js_highlight(self):
         self._wysiwyg.page().runJavaScript("highlightSelection()")

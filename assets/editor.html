@@ -868,6 +868,50 @@
     } catch(e) {}
   }
 
+  // ── Link click & TOC helpers ──────────────────────────────────────────────────
+
+  function _headingToAnchor(text) {
+    return (text || '').trim().toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^\wÀ-ɏ-]/g, '')
+      .replace(/-{2,}/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  function _scrollToAnchor(id) {
+    var el = document.getElementById(id);
+    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    var headings = document.querySelectorAll(
+      '.ProseMirror h1,.ProseMirror h2,.ProseMirror h3,' +
+      '.ProseMirror h4,.ProseMirror h5,.ProseMirror h6'
+    );
+    for (var i = 0; i < headings.length; i++) {
+      if (_headingToAnchor(headings[i].textContent || '') === id) {
+        headings[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+    }
+  }
+
+  function insertTOC() {
+    if (!editor) return;
+    var md = editor.getMarkdown();
+    var lines = md.split('\n');
+    var tocLines = [];
+    lines.forEach(function(line) {
+      var m = line.match(/^(#{1,6})\s+(.+)$/);
+      if (!m) return;
+      var level = m[1].length;
+      var text = m[2].trim();
+      var anchor = _headingToAnchor(text);
+      var indent = '  '.repeat(Math.max(0, level - 1));
+      tocLines.push(indent + '- [' + text + '](#' + anchor + ')');
+    });
+    if (tocLines.length === 0) return;
+    var toc = '## Daftar Isi\n\n' + tocLines.join('\n') + '\n\n---\n\n';
+    editor.setMarkdown(toc + md);
+  }
+
   // ── Slash command palette ─────────────────────────────────────────────────────
   var SLASH_COMMANDS = [
     { group: 'Format',    icon: 'B',    label: 'Bold',          desc: 'Bold text',              cmd: function() { editor.exec('bold'); } },
@@ -885,6 +929,7 @@
     { group: 'Insert',    icon: '</>',  label: 'Code Block',    desc: 'Fenced code block',      cmd: function() { insertCodeBlock(''); } },
     { group: 'Insert',    icon: '`',    label: 'Inline Code',   desc: 'Inline code span',       cmd: function() { editor.exec('code'); } },
     { group: 'Insert',    icon: '⊞',   label: 'Table',         desc: '3 × 3 table',            cmd: function() { insertTable(3, 3); } },
+    { group: 'Insert',    icon: '≡',   label: 'Table of Contents', desc: 'Auto-generate TOC from headings', cmd: function() { insertTOC(); } },
   ];
 
   var _slashActive    = false;
@@ -1190,6 +1235,25 @@
         setTimeout(applyHighlighting, 80);
       }
     });
+
+    // Intercept link clicks inside the editor:
+    // - Internal anchors (#heading) → smooth scroll
+    // - External URLs → open via Python bridge (QDesktopServices)
+    document.addEventListener('click', function(e) {
+      var a = e.target.closest && e.target.closest('a[href]');
+      if (!a) return;
+      var editorEl = document.getElementById('editor');
+      if (!editorEl || !editorEl.contains(a)) return;
+      var href = a.getAttribute('href');
+      if (!href) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (href.charAt(0) === '#') {
+        _scrollToAnchor(href.slice(1));
+      } else if (bridge) {
+        bridge.open_url(href);
+      }
+    }, true);
 
   });
 </script>
