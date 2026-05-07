@@ -910,7 +910,7 @@
     });
     if (tocLines.length === 0) return;
     // Two trailing spaces = markdown line break (no list bullets)
-    var toc = '## Daftar Isi\n\n' + tocLines.join('  \n') + '\n\n---\n\n';
+    var toc = '## Table of Contents\n\n' + tocLines.join('  \n') + '\n\n---\n\n';
     editor.setMarkdown(toc + md);
   }
 
