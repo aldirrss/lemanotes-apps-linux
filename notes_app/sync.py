@@ -118,18 +118,26 @@ class SyncManager:
             from supabase import create_client
             self._client = create_client(url, key)
             if session_data and session_data.get("refresh_token"):
-                # Keep refresh_token so we can retry if the first background
-                # refresh fails due to a transient network error.
+                # Keep refresh_token for network-error retry on next startup.
                 self._stored_refresh_token = session_data["refresh_token"]
-                # Mark optimistic so is_logged_in() returns True immediately while
-                # the background refresh is in flight (access_token may be expired).
+                # Mark optimistic so is_logged_in() returns True while background
+                # refresh is in flight (access_token may be expired).
                 self._optimistic_logged_in = True
                 try:
-                    self._client.auth.set_session(
+                    res = self._client.auth.set_session(
                         session_data["access_token"],
                         session_data["refresh_token"],
                     )
+                    # set_session() auto-refreshes when access_token is expired.
+                    # If the refresh_token rotated, update our copy NOW to avoid
+                    # Scenario B: _refresh_session_bg() calling refresh with stale token.
+                    if (res and res.session and res.session.refresh_token
+                            and res.session.refresh_token != session_data["refresh_token"]):
+                        self._stored_refresh_token = res.session.refresh_token
+                        self._save_session(res.session)
                 except Exception:
+                    # Network down or token completely invalid — keep stored_refresh_token
+                    # so _refresh_session_bg() can retry with it explicitly.
                     pass
                 threading.Thread(target=self._refresh_session_bg, daemon=True).start()
             self._ready = True
@@ -139,28 +147,39 @@ class SyncManager:
     def _refresh_session_bg(self):
         """Refresh access token in background.
 
-        Only clears stored session on auth errors (token revoked / invalid).
-        Network/transient errors keep the refresh_token so the next startup
-        can retry — avoids logging the user out just because the network was
-        not yet ready when the app started.
+        Always passes stored_refresh_token explicitly to refresh_session() so the
+        call succeeds even when set_session() failed (Scenario A: network not yet
+        ready at startup → client internal storage is empty).
+
+        Only clears the stored session on definitive server-side auth errors
+        (token revoked / invalid). Network/transient errors keep the token so
+        the next startup can retry.
         """
         try:
-            res = self._client.auth.refresh_session()
+            # Pass stored_refresh_token explicitly — bypasses the client's internal
+            # session state which may be empty if set_session() failed at startup.
+            res = self._client.auth.refresh_session(self._stored_refresh_token)
             if res and res.session:
                 self._save_session(res.session)
+                self._stored_refresh_token = None
                 self._optimistic_logged_in = False
             else:
-                # Null response = token definitively rejected
+                # Null response = token definitively rejected by server
                 self._optimistic_logged_in = False
                 self._clear_stored_session()
         except Exception as exc:
             exc_name = type(exc).__name__.lower()
-            # AuthApiError / AuthException = token invalid or revoked → must clear
+            exc_str  = str(exc).lower()
+            # Server-side auth rejection → must clear (user needs to re-login)
+            # Network / transient errors → keep token, retry on next startup
             is_auth_error = (
-                "auth" in exc_name
-                or "invalid" in str(exc).lower()
-                or "revoked" in str(exc).lower()
-                or "expired" in str(exc).lower()
+                "authapiexception"        in exc_name
+                or "authinvalidcredentials" in exc_name
+                or "invalid_grant"         in exc_str
+                or "token_revoked"         in exc_str
+                or "token_expired"         in exc_str
+                or "refresh_token_not_found" in exc_str
+                or "user_not_found"        in exc_str
             )
             self._optimistic_logged_in = False
             if is_auth_error:
