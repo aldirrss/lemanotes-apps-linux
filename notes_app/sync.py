@@ -75,9 +75,8 @@ class SyncManager:
         self._client = None
         self._ready = False
         self._env_locked = False
-        self._optimistic_logged_in = False
         self._on_session_refresh: "callable | None" = None
-        self._stored_refresh_token: "str | None" = None  # kept for network-error retry
+        self._stored_refresh_token: "str | None" = None
         self._load_config()
 
     # ── Config / init ────────────────────────────────────────────────────────────
@@ -114,100 +113,91 @@ class SyncManager:
         self._on_session_refresh = cb
 
     def _init_client(self, url: str, key: str, session_data: dict | None = None):
+        """Set up Supabase client and restore session from local storage.
+
+        No background refresh is attempted at startup — refresh happens lazily
+        before sync operations. This means the app works even when the network
+        is not yet available at boot time.
+        """
         try:
             from supabase import create_client
             self._client = create_client(url, key)
             if session_data and session_data.get("refresh_token"):
-                # Keep refresh_token for network-error retry on next startup.
+                # Store the refresh_token so is_logged_in() returns True immediately.
+                # The access_token may be expired but that is fine — it will be
+                # refreshed lazily when the user triggers a sync operation.
                 self._stored_refresh_token = session_data["refresh_token"]
-                # Mark optimistic so is_logged_in() returns True while background
-                # refresh is in flight (access_token may be expired).
-                self._optimistic_logged_in = True
                 try:
-                    res = self._client.auth.set_session(
+                    self._client.auth.set_session(
                         session_data["access_token"],
                         session_data["refresh_token"],
                     )
-                    # set_session() auto-refreshes when access_token is expired.
-                    # If the refresh_token rotated, update our copy NOW to avoid
-                    # Scenario B: _refresh_session_bg() calling refresh with stale token.
-                    if (res and res.session and res.session.refresh_token
-                            and res.session.refresh_token != session_data["refresh_token"]):
-                        self._stored_refresh_token = res.session.refresh_token
-                        self._save_session(res.session)
                 except Exception:
-                    # Network down or token completely invalid — keep stored_refresh_token
-                    # so _refresh_session_bg() can retry with it explicitly.
                     pass
-                threading.Thread(target=self._refresh_session_bg, daemon=True).start()
             self._ready = True
         except Exception:
             self._ready = False
 
-    def _refresh_session_bg(self):
-        """Refresh access token in background.
+    def _do_refresh(self) -> bool:
+        """Perform a token refresh using the stored refresh_token.
 
-        Always passes stored_refresh_token explicitly to refresh_session() so the
-        call succeeds even when set_session() failed (Scenario A: network not yet
-        ready at startup → client internal storage is empty).
-
-        Only clears the stored session on definitive server-side auth errors
-        (token revoked / invalid). Network/transient errors keep the token so
-        the next startup can retry.
+        Updates the stored session on success.
+        Clears the session only on definitive server-side rejection.
+        Returns True if the session is now valid.
         """
+        if not self._client or not self._stored_refresh_token:
+            return False
         try:
-            # Pass stored_refresh_token explicitly — bypasses the client's internal
-            # session state which may be empty if set_session() failed at startup.
             res = self._client.auth.refresh_session(self._stored_refresh_token)
             if res and res.session:
                 self._save_session(res.session)
-                self._stored_refresh_token = None
-                self._optimistic_logged_in = False
-            else:
-                # Null response = token definitively rejected by server
-                self._optimistic_logged_in = False
-                self._clear_stored_session()
+                if res.session.refresh_token:
+                    self._stored_refresh_token = res.session.refresh_token
+                if self._on_session_refresh:
+                    self._on_session_refresh()
+                return True
+            # Null response = server definitively rejected the token
+            self._stored_refresh_token = None
+            self._clear_stored_session()
+            if self._on_session_refresh:
+                self._on_session_refresh()
+            return False
         except Exception as exc:
             exc_name = type(exc).__name__.lower()
             exc_str  = str(exc).lower()
-            # Server-side auth rejection → must clear (user needs to re-login)
-            # Network / transient errors → keep token, retry on next startup
-            is_auth_error = (
-                "authapiexception"        in exc_name
+            is_server_rejection = (
+                "authapiexception"          in exc_name
                 or "authinvalidcredentials" in exc_name
-                or "invalid_grant"         in exc_str
-                or "token_revoked"         in exc_str
-                or "token_expired"         in exc_str
+                or "invalid_grant"          in exc_str
+                or "token_revoked"          in exc_str
+                or "token_expired"          in exc_str
                 or "refresh_token_not_found" in exc_str
-                or "user_not_found"        in exc_str
+                or "user_not_found"         in exc_str
             )
-            self._optimistic_logged_in = False
-            if is_auth_error:
-                self._clear_stored_session()
-            # Network/timeout errors: keep refresh_token, retry on next startup
-        if self._on_session_refresh:
-            self._on_session_refresh()
-
-    def retry_refresh_if_needed(self):
-        """Re-attempt token refresh if the startup refresh failed (network error).
-
-        Call this before any sync operation that requires auth.
-        Runs synchronously — intended for background threads only.
-        """
-        if self.is_logged_in() or not self._client:
-            return
-        if not self._stored_refresh_token:
-            return
-        try:
-            self._client.auth.set_session("", self._stored_refresh_token)
-            res = self._client.auth.refresh_session()
-            if res and res.session:
-                self._save_session(res.session)
+            if is_server_rejection:
                 self._stored_refresh_token = None
+                self._clear_stored_session()
                 if self._on_session_refresh:
                     self._on_session_refresh()
+            # Network / transient error → keep token, will retry on next sync
+            return False
+
+    def retry_refresh_if_needed(self):
+        """Refresh the access token if the client session has expired.
+
+        Called before every sync operation (pull/push). Runs synchronously
+        in the background sync thread.
+        """
+        if not self._client or not self._stored_refresh_token:
+            return
+        # If the client already has a valid in-memory session, skip the refresh.
+        try:
+            session = self._client.auth.get_session()
+            if session and session.user:
+                return
         except Exception:
             pass
+        self._do_refresh()
 
     def _clear_stored_session(self):
         _keyring_clear()
@@ -246,7 +236,10 @@ class SyncManager:
     def is_logged_in(self) -> bool:
         if not self._client:
             return False
-        if self._optimistic_logged_in:
+        # Having a stored refresh_token means the user logged in and never
+        # explicitly logged out — consider them logged in regardless of whether
+        # the access_token has expired (it will be refreshed before next sync).
+        if self._stored_refresh_token:
             return True
         try:
             session = self._client.auth.get_session()
@@ -263,8 +256,8 @@ class SyncManager:
                 return session.user.email
         except Exception:
             pass
-        # Fallback to stored email during optimistic phase (access_token still pending refresh)
-        if self._optimistic_logged_in:
+        # Fallback: read email from locally stored session data
+        if self._stored_refresh_token:
             stored = _keyring_load() or load_settings().get("supabase_session", {})
             return stored.get("user_email")
         return None
