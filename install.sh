@@ -122,15 +122,23 @@ fi
 success "System dependencies done"
 
 # ── Step 2 — Detect or create Python environment ──────────────────────────────
-info "Detecting Python environment with PyQt6…"
+info "Detecting Python environment with PyQt6 + WebEngine…"
 PYTHON_BIN=""
 USING_VENV=false
+
+# Full WebEngine check — import PyQt6 alone is not enough;
+# some envs have PyQt6 but are missing Qt6 QML / WebEngine shared libs.
+_WEBENGINE_CHECK="from PyQt6.QtWebEngineWidgets import QWebEngineView"
 
 # Priority 1: active conda env
 if [[ -n "${CONDA_PREFIX:-}" ]]; then
     _py="$CONDA_PREFIX/bin/python"
-    "$_py" -c "import PyQt6" 2>/dev/null && PYTHON_BIN="$_py" && \
+    if "$_py" -c "$_WEBENGINE_CHECK" 2>/dev/null; then
+        PYTHON_BIN="$_py"
         info "Using active conda env: ${CONDA_DEFAULT_ENV:-unknown}"
+    else
+        info "Active conda env missing WebEngine — skipping"
+    fi
 fi
 
 # Priority 2: all conda envs
@@ -140,23 +148,23 @@ if [[ -z "$PYTHON_BIN" ]] && command -v conda &>/dev/null; then
         while IFS= read -r _env; do
             _py="$_env/bin/python"
             [[ -x "$_py" ]] || continue
-            if "$_py" -c "import PyQt6" 2>/dev/null; then
+            if "$_py" -c "$_WEBENGINE_CHECK" 2>/dev/null; then
                 PYTHON_BIN="$_py"
-                info "Found PyQt6 in conda env: $_env"
+                info "Found PyQt6+WebEngine in conda env: $_env"
                 break
             fi
         done < <(find "$_base/envs" -maxdepth 1 -mindepth 1 -type d 2>/dev/null)
     fi
 fi
 
-# Priority 3: system python that already has PyQt6 — wrap it in a venv
+# Priority 3: system python that already has PyQt6+WebEngine — wrap it in a venv
 #   Use --system-site-packages so PyQt6 (from apt) stays accessible,
 #   then install remaining pip packages safely inside the venv.
 if [[ -z "$PYTHON_BIN" ]]; then
     for _candidate in python3.12 python3.11 python3.10 python3; do
         _full=$(command -v "$_candidate" 2>/dev/null || true)
-        if [[ -n "$_full" ]] && "$_full" -c "import PyQt6" 2>/dev/null; then
-            info "Found PyQt6 in system Python: $_full — creating venv with --system-site-packages"
+        if [[ -n "$_full" ]] && "$_full" -c "$_WEBENGINE_CHECK" 2>/dev/null; then
+            info "Found PyQt6+WebEngine in system Python: $_full — creating venv with --system-site-packages"
             mkdir -p "$INSTALL_DIR"
             "$_full" -m venv --system-site-packages "$VENV_DIR"
             PYTHON_BIN="$VENV_DIR/bin/python"

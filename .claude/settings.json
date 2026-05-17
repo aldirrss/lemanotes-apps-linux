@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import ast; ast.parse\\(open\\('notes_app/main_window.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(bash -n /home/it-dev-mzt/project/linux-app/lemanotes-apps/install.sh)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('notes_app/note_list.py'\\).read\\(\\)\\); print\\('note_list OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('notes_app/main_window.py'\\).read\\(\\)\\); print\\('main_window OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('notes_app/sidebar.py'\\).read\\(\\)\\); print\\('sidebar OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('notes_app/sidebar.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('notes_app/sync.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python3)",
+      "Bash(python3 -c \"import inspect; from gotrue import SyncGoTrueClient; print\\(inspect.signature\\(SyncGoTrueClient.refresh_session\\)\\)\")",
+      "Bash(python3 -c \"import supabase; print\\(supabase.__version__\\)\")",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -c \"from PyQt6.QtWebEngineWidgets import QWebEngineView; print\\('system python OK'\\)\")",
+      "Bash(dpkg -l python3-pyqt6.qtwebengine)"
+    ]
+  }
+}

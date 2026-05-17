@@ -182,22 +182,42 @@ class SyncManager:
             # Network / transient error → keep token, will retry on next sync
             return False
 
-    def retry_refresh_if_needed(self):
-        """Refresh the access token if the client session has expired.
+    def retry_refresh_if_needed(self) -> bool:
+        """Ensure the client has a valid session before a sync operation.
 
-        Called before every sync operation (pull/push). Runs synchronously
-        in the background sync thread.
+        Returns True if the session is (or becomes) valid.
+        Called synchronously from background sync threads.
         """
-        if not self._client or not self._stored_refresh_token:
-            return
-        # If the client already has a valid in-memory session, skip the refresh.
+        if not self._client:
+            return False
+        # Check in-memory session first — covers fresh login where
+        # the client already holds a valid session without needing a refresh.
         try:
             session = self._client.auth.get_session()
             if session and session.user:
-                return
+                return True
         except Exception:
             pass
-        self._do_refresh()
+        # No valid in-memory session — try to refresh using stored token.
+        if not self._stored_refresh_token:
+            return False
+        return self._do_refresh()
+
+    def _get_uid(self) -> "str | None":
+        """Return the current user's ID from the in-memory session."""
+        try:
+            session = self._client.auth.get_session()
+            if session and session.user:
+                return session.user.id
+        except Exception:
+            pass
+        try:
+            resp = self._client.auth.get_user()
+            if resp and resp.user:
+                return resp.user.id
+        except Exception:
+            pass
+        return None
 
     def _clear_stored_session(self):
         _keyring_clear()
@@ -264,13 +284,19 @@ class SyncManager:
 
     # ── Login methods ────────────────────────────────────────────────────────────
 
+    def _apply_session(self, session) -> None:
+        """Persist a newly obtained session and update the in-memory token."""
+        self._save_session(session)
+        if session.refresh_token:
+            self._stored_refresh_token = session.refresh_token
+
     def login_email(self, email: str, password: str) -> tuple[bool, str]:
         if not self._client:
             return False, "Supabase is not configured"
         try:
             res = self._client.auth.sign_in_with_password({"email": email, "password": password})
             if res.session:
-                self._save_session(res.session)
+                self._apply_session(res.session)
             return True, ""
         except Exception as e:
             return False, str(e)
@@ -281,7 +307,7 @@ class SyncManager:
         try:
             res = self._client.auth.sign_up({"email": email, "password": password})
             if res.session:
-                self._save_session(res.session)
+                self._apply_session(res.session)
                 return True, ""
             return True, "confirm_email"
         except Exception as e:
@@ -351,7 +377,7 @@ class SyncManager:
                 try:
                     r = self._client.auth.exchange_code_for_session({"auth_code": code})
                     if r.session:
-                        self._save_session(r.session)
+                        self._apply_session(r.session)
                     on_done(True, "")
                 except Exception as e:
                     on_done(False, str(e))
@@ -366,6 +392,7 @@ class SyncManager:
                 self._client.auth.sign_out()
             except Exception:
                 pass
+        self._stored_refresh_token = None
         _keyring_clear()
         s = load_settings()
         s.pop("supabase_session", None)
@@ -392,7 +419,9 @@ class SyncManager:
         if not note:
             return
         try:
-            uid = self._client.auth.get_user().user.id
+            uid = self._get_uid()
+            if not uid:
+                return
             now = datetime.now(timezone.utc).isoformat()
             self._client.table("notes").upsert({
                 "user_id":   uid,
@@ -416,7 +445,9 @@ class SyncManager:
         if not self.is_logged_in():
             return
         try:
-            uid = self._client.auth.get_user().user.id
+            uid = self._get_uid()
+            if not uid:
+                return
             (self._client.table("notes")
              .update({"is_deleted": True})
              .eq("user_id", uid)
@@ -434,7 +465,9 @@ class SyncManager:
             return
         try:
             from datetime import datetime, timezone
-            uid = self._client.auth.get_user().user.id
+            uid = self._get_uid()
+            if not uid:
+                return
             ts = trashed_at or datetime.now(timezone.utc).isoformat()
             (self._client.table("notes")
              .update({"trashed_at": ts})
@@ -452,7 +485,9 @@ class SyncManager:
         if not self.is_logged_in():
             return
         try:
-            uid = self._client.auth.get_user().user.id
+            uid = self._get_uid()
+            if not uid:
+                return
             (self._client.table("notes")
              .update({"trashed_at": None})
              .eq("user_id", uid)
@@ -468,7 +503,9 @@ class SyncManager:
         if not self.is_logged_in():
             return
         try:
-            uid = self._client.auth.get_user().user.id
+            uid = self._get_uid()
+            if not uid:
+                return
             (self._client.table("notes")
              .update({"is_deleted": True})
              .eq("user_id", uid)
@@ -483,7 +520,9 @@ class SyncManager:
         if not self.is_logged_in():
             return
         try:
-            uid = self._client.auth.get_user().user.id
+            uid = self._get_uid()
+            if not uid:
+                return
             (self._client.table("notes")
              .update({"is_deleted": True})
              .eq("user_id", uid)
@@ -498,12 +537,12 @@ class SyncManager:
         Returns (count_written, error_message).
         error_message is empty string on success.
         """
-        self.retry_refresh_if_needed()
-        if not self.is_logged_in():
-            return 0, "Not logged in"
+        if not self.retry_refresh_if_needed():
+            return 0, "Not logged in or session could not be refreshed"
         try:
-            session = self._client.auth.get_session()
-            uid = session.user.id
+            uid = self._get_uid()
+            if not uid:
+                return 0, "Could not retrieve user ID — please sync again"
             res = (self._client.table("notes")
                    .select("*")
                    .eq("user_id", uid)
@@ -560,9 +599,8 @@ class SyncManager:
 
     def push_all(self) -> str:
         """Push all local notes (active + trashed) to cloud. Returns error string or empty."""
-        self.retry_refresh_if_needed()
-        if not self.is_logged_in():
-            return "Not logged in"
+        if not self.retry_refresh_if_needed():
+            return "Not logged in or session could not be refreshed"
         try:
             for nb in storage._all_notebook_dirs():
                 for note in storage.list_notes(nb, include_trashed=True):
@@ -586,7 +624,9 @@ class SyncManager:
         try:
             file_path = _Path(file_path)
             # Storage path: <user_id>/<notebook>[/<section>]/<slug>/<filename>
-            user_id = self._client.auth.get_user().user.id
+            user_id = self._get_uid()
+            if not user_id:
+                return ""
             parts = [user_id, notebook]
             if section:
                 parts.append(section)
