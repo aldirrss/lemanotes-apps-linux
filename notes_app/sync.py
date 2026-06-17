@@ -128,10 +128,18 @@ class SyncManager:
                 # refreshed lazily when the user triggers a sync operation.
                 self._stored_refresh_token = session_data["refresh_token"]
                 try:
-                    self._client.auth.set_session(
+                    resp = self._client.auth.set_session(
                         session_data["access_token"],
                         session_data["refresh_token"],
                     )
+                    # set_session may internally refresh an expired access_token
+                    # (Supabase uses token rotation). Persist the new session so
+                    # that the keyring stays current — otherwise the next restart
+                    # loads a revoked refresh_token and sync will always fail.
+                    if resp and resp.session:
+                        if resp.session.refresh_token:
+                            self._stored_refresh_token = resp.session.refresh_token
+                        self._save_session(resp.session)
                 except Exception:
                     pass
             self._ready = True
@@ -163,17 +171,33 @@ class SyncManager:
                 self._on_session_refresh()
             return False
         except Exception as exc:
-            exc_name = type(exc).__name__.lower()
             exc_str  = str(exc).lower()
-            is_server_rejection = (
-                "authapiexception"          in exc_name
-                or "authinvalidcredentials" in exc_name
-                or "invalid_grant"          in exc_str
-                or "token_revoked"          in exc_str
-                or "token_expired"          in exc_str
-                or "refresh_token_not_found" in exc_str
-                or "user_not_found"         in exc_str
-            )
+            # Detect server-side token rejection so we can clear the stale token.
+            # Use isinstance check (supabase_auth v2) with string-match fallback.
+            is_server_rejection = False
+            try:
+                from supabase_auth.errors import AuthApiError, AuthRetryableError
+                # AuthRetryableError is transient (network) — do NOT clear the token.
+                # AuthApiError with 4xx status is a definitive server rejection.
+                if isinstance(exc, AuthApiError) and not isinstance(exc, AuthRetryableError):
+                    status = getattr(exc, "status", 0)
+                    is_server_rejection = status in (400, 401, 403)
+            except ImportError:
+                pass
+            # Fallback: also check known rejection phrases in the error message.
+            if not is_server_rejection:
+                exc_name = type(exc).__name__.lower()
+                is_server_rejection = (
+                    "authapierror"              in exc_name
+                    or "authinvalidcredentials" in exc_name
+                    or "invalid_grant"          in exc_str
+                    or "token_revoked"          in exc_str
+                    or "token_expired"          in exc_str
+                    or "refresh token not found" in exc_str
+                    or "refresh_token_not_found" in exc_str
+                    or "session_not_found"       in exc_str
+                    or "user_not_found"          in exc_str
+                )
             if is_server_rejection:
                 self._stored_refresh_token = None
                 self._clear_stored_session()
@@ -449,7 +473,7 @@ class SyncManager:
             if not uid:
                 return
             (self._client.table("notes")
-             .update({"is_deleted": True})
+             .delete()
              .eq("user_id", uid)
              .eq("notebook", notebook)
              .eq("section", section or "")
@@ -499,7 +523,7 @@ class SyncManager:
             print(f"[Sync] restore_note error: {e}")
 
     def delete_section_remote(self, notebook: str, section: str) -> None:
-        """Mark all notes in a section as permanently deleted in Supabase."""
+        """Hard-delete all notes in a section from Supabase."""
         if not self.is_logged_in():
             return
         try:
@@ -507,7 +531,7 @@ class SyncManager:
             if not uid:
                 return
             (self._client.table("notes")
-             .update({"is_deleted": True})
+             .delete()
              .eq("user_id", uid)
              .eq("notebook", notebook)
              .eq("section", section)
@@ -516,7 +540,7 @@ class SyncManager:
             print(f"[Sync] delete_section error: {e}")
 
     def delete_notebook_remote(self, notebook: str) -> None:
-        """Mark all notes in a notebook as permanently deleted in Supabase."""
+        """Hard-delete all notes in a notebook from Supabase."""
         if not self.is_logged_in():
             return
         try:
@@ -524,7 +548,7 @@ class SyncManager:
             if not uid:
                 return
             (self._client.table("notes")
-             .update({"is_deleted": True})
+             .delete()
              .eq("user_id", uid)
              .eq("notebook", notebook)
              .execute())
@@ -608,9 +632,26 @@ class SyncManager:
                 for sec in storage._all_section_dirs(nb):
                     for note in storage.list_notes(nb, sec, include_trashed=True):
                         self.push_note(nb, note["slug"], sec)
+            # Clean up any leftover soft-deleted records (is_deleted = true)
+            # that may have been created by older versions of the app.
+            self._purge_remote_soft_deleted()
             return ""
         except Exception as e:
             return str(e)
+
+    def _purge_remote_soft_deleted(self) -> None:
+        """Hard-delete any rows that were soft-deleted (is_deleted = true) from older builds."""
+        try:
+            uid = self._get_uid()
+            if not uid:
+                return
+            (self._client.table("notes")
+             .delete()
+             .eq("user_id", uid)
+             .eq("is_deleted", True)
+             .execute())
+        except Exception as e:
+            print(f"[Sync] purge_soft_deleted error: {e}")
 
     def upload_attachment(self, notebook: str, slug: str, section: str | None,
                           file_path) -> str:

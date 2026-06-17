@@ -9,6 +9,7 @@ from notes_app.themes import THEMES
 from notes_app.widgets import NotebookTreeWidget
 from notes_app.dialogs import PromptDialog
 from notes_app import storage
+from notes_app.settings import load_settings, save_settings
 
 
 class SidebarPanel(QWidget):
@@ -33,6 +34,10 @@ class SidebarPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._theme = THEMES["dark"]
+        self._is_collapsed = False
+        self._collapsed_notebooks: set[str] = set()
+        self._load_ui_state()
+
         self.setMinimumWidth(190)
         self.setMaximumWidth(280)
 
@@ -44,7 +49,12 @@ class SidebarPanel(QWidget):
         self._header = QWidget()
         self._header.setFixedHeight(56)
         hl = QHBoxLayout(self._header)
-        hl.setContentsMargins(16, 0, 8, 0)
+        hl.setContentsMargins(8, 0, 8, 0)
+        self._collapse_btn = QPushButton("\u25c4")
+        self._collapse_btn.setFixedSize(24, 24)
+        self._collapse_btn.setToolTip("Hide sidebar (Ctrl+B)")
+        self._collapse_btn.clicked.connect(self.toggle_collapsed)
+        hl.addWidget(self._collapse_btn)
         self._header_title = QLabel("\U0001f4d3  LemaNotes")
         hl.addWidget(self._header_title)
         hl.addStretch()
@@ -77,6 +87,8 @@ class SidebarPanel(QWidget):
         self._tree = NotebookTreeWidget()
         self._tree.currentItemChanged.connect(self._on_tree_item_changed)
         self._tree.note_dropped.connect(self.note_moved)
+        self._tree.itemExpanded.connect(self._on_item_expanded)
+        self._tree.itemCollapsed.connect(self._on_item_collapsed)
         layout.addWidget(self._tree)
 
         # Tags section
@@ -131,6 +143,7 @@ class SidebarPanel(QWidget):
         self._theme_btn.setStyleSheet(_icon_btn)
         self._nb_sort_btn.setStyleSheet(_icon_btn)
         self._add_btn.setStyleSheet(_icon_btn.replace("13px", "16px"))
+        self._collapse_btn.setStyleSheet(_icon_btn.replace("13px", "11px"))
         self._theme_btn.setText(t["theme_icon"])
         self._sep.setStyleSheet(f"background: {t['border']};")
         self._tree.setStyleSheet(f"""
@@ -190,7 +203,7 @@ class SidebarPanel(QWidget):
         for nb in notebooks:
             nb_item = QTreeWidgetItem(self._tree, [f"  \U0001f4c1  {nb}"])
             nb_item.setData(0, Qt.ItemDataRole.UserRole, (nb, ""))
-            nb_item.setExpanded(True)
+            nb_item.setExpanded(nb not in self._collapsed_notebooks)
             for sec in storage.list_sections(nb):
                 sec_item = QTreeWidgetItem(nb_item, [f"  \U0001f4c4  {sec}"])
                 sec_item.setData(0, Qt.ItemDataRole.UserRole, (nb, sec))
@@ -362,6 +375,83 @@ class SidebarPanel(QWidget):
         visible = not self._tags_scroll.isVisible()
         self._tags_scroll.setVisible(visible)
         self._tags_toggle_btn.setText("\u25be" if visible else "\u25b8")
+
+    # \u2500\u2500 Sidebar collapse \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+    def _load_ui_state(self):
+        s = load_settings()
+        self._collapsed_notebooks = set(s.get("collapsed_notebooks", []))
+        self._is_collapsed = s.get("sidebar_collapsed", False)
+
+    def _save_ui_state(self):
+        s = load_settings()
+        s["collapsed_notebooks"] = sorted(self._collapsed_notebooks)
+        s["sidebar_collapsed"] = self._is_collapsed
+        save_settings(s)
+
+    def toggle_collapsed(self):
+        if self._is_collapsed:
+            self._expand()
+        else:
+            self._collapse()
+
+    def _collapse(self):
+        self._is_collapsed = True
+        self._header_title.setVisible(False)
+        self._theme_btn.setVisible(False)
+        self._nb_sort_btn.setVisible(False)
+        self._add_btn.setVisible(False)
+        self._sep.setVisible(False)
+        self._tree.setVisible(False)
+        self._tags_sep.setVisible(False)
+        self._tags_header.setVisible(False)
+        self._tags_scroll.setVisible(False)
+        self.setMinimumWidth(0)
+        self.setMaximumWidth(36)
+        self.setFixedWidth(36)
+        self._collapse_btn.setText("\u25ba")
+        self._collapse_btn.setToolTip("Show sidebar (Ctrl+B)")
+        self._save_ui_state()
+
+    def _expand(self):
+        self._is_collapsed = False
+        self._header_title.setVisible(True)
+        self._theme_btn.setVisible(True)
+        self._nb_sort_btn.setVisible(True)
+        self._add_btn.setVisible(True)
+        self._sep.setVisible(True)
+        self._tree.setVisible(True)
+        self._tags_sep.setVisible(True)
+        self._tags_header.setVisible(True)
+        self._tags_scroll.setVisible(True)
+        self.setMinimumWidth(190)
+        self.setMaximumWidth(280)
+        self._collapse_btn.setText("\u25c4")
+        self._collapse_btn.setToolTip("Hide sidebar (Ctrl+B)")
+        self._save_ui_state()
+
+    def apply_initial_collapse(self):
+        """Apply saved collapse state \u2014 call once after the window is shown."""
+        if self._is_collapsed:
+            self._collapse()
+
+    # \u2500\u2500 Notebook expand / collapse \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+    def _on_item_expanded(self, item: QTreeWidgetItem):
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if data:
+            nb, sec = data
+            if not sec:
+                self._collapsed_notebooks.discard(nb)
+                self._save_ui_state()
+
+    def _on_item_collapsed(self, item: QTreeWidgetItem):
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if data:
+            nb, sec = data
+            if not sec:
+                self._collapsed_notebooks.add(nb)
+                self._save_ui_state()
 
     def _show_notebook_sort_menu(self):
         t = self._theme

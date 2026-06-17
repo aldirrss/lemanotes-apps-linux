@@ -73,6 +73,7 @@ class MainWindow(QMainWindow):
         self._apply_theme(self._theme_name)
         self.editor_panel.set_font_size(self._font_size)
         self.sidebar.refresh_tags()
+        self.sidebar.apply_initial_collapse()
         threading.Thread(target=self._startup_cleanup, daemon=True).start()
 
     def _build_ui(self):
@@ -185,6 +186,11 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self._import_act)
 
         view_menu = self._menubar.addMenu("View")
+        self._toggle_sidebar_act = QAction("Toggle Sidebar", self)
+        self._toggle_sidebar_act.setShortcut(QKeySequence("Ctrl+B"))
+        self._toggle_sidebar_act.triggered.connect(self.sidebar.toggle_collapsed)
+        view_menu.addAction(self._toggle_sidebar_act)
+        view_menu.addSeparator()
         self._refresh_act = QAction("Refresh Notes", self)
         self._refresh_act.setShortcut(QKeySequence("Ctrl+R"))
         self._refresh_act.triggered.connect(self._refresh_notes)
